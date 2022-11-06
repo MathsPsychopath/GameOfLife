@@ -4,6 +4,8 @@ import (
 	// "fmt"
 	// "strconv"
 
+	"strconv"
+
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -16,7 +18,7 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-// create a black 2D slice of size p.ImageHeight x p.ImageWidth
+// create a blak 2D slice of size p.ImageHeight x p.ImageWidth
 func initialiseNewWorld(p Params) [][]byte {
 	world := make([][]byte, p.ImageHeight)
 	for i := range(world){
@@ -92,12 +94,20 @@ func getAliveCells(world [][]byte) []util.Cell {
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
-	// TODO: Create a 2D slice to store the world.
+	// TODO: Give the filename to the io.channels.filename channel
+	c.ioCommand <- ioInput
+	// e.g., 64x64, 128x128 etc.
+	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight))
+
+	// TODO: Create a 2D slice to store the world and populate it
 	world := initialiseNewWorld(p)
 
-	// TODO: Give the filename to the io.channels.filename channel
-	
 	// TODO: Populate blank 2D slice with world data from input
+	for i := 0; i < p.ImageHeight; i++{
+		for j := 0; j < p.ImageWidth; j++ {
+			world[i][j] = <-c.ioInput
+		}
+	}
 
 	turn := 0
 	// TODO: Execute all turns of the Game of Life.
