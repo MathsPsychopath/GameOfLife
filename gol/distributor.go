@@ -5,6 +5,7 @@ import (
 	// "strconv"
 
 	"strconv"
+	"time"
 
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -119,6 +120,19 @@ func getAliveCells(world [][]byte) []util.Cell {
 	return aliveCells
 }
 
+// get the number of alive cells
+func getAliveCellsCount(world [][]byte) int {
+	count := 0
+	for _, row := range(world) {
+		for _, cell := range(row) {
+			if cell == 0xFF {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 // create a worker assigned to a segment of the image
 func worker(startY, endY int, p Params,
 	input <-chan [][]byte, output chan [][]byte) {
@@ -126,6 +140,24 @@ func worker(startY, endY int, p Params,
 		oldWorld := <- input
 		newWorld := evolveParameterizable(oldWorld, startY, endY, p)
 		output <- newWorld
+	}
+}
+
+func reportCellCount(input <-chan [][]byte, quit <-chan bool, 
+	events chan<- Event, completedTurns <-chan int){
+	ticker:= time.NewTicker(2*time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			world := <-input
+			turn := <-completedTurns
+			alive := getAliveCellsCount(world)
+			events <- AliveCellsCount{CellsCount: alive, CompletedTurns: turn}
+		case <-quit:
+			ticker.Stop()
+			return
+		}
 	}
 }
 
@@ -167,14 +199,27 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
+	// start ticker to indicate alive cells
+	worldChannel := make(chan [][]byte)
+	turnChannel := make(chan int)
+	quit := make(chan bool)
+	go reportCellCount(worldChannel, quit, c.events, turnChannel)
+
 	// TODO: Execute all turns of the Game of Life.
 	turn := 0
 	for ;turn < p.Turns; turn++  {
 		newWorld := [][]byte {}
+		// non-blocking send
+		select {
+		case worldChannel <- world:
+			turnChannel <- turn
+		default:
+		}
 		for i := 0; i < p.Threads; i++ {
 			workerInputs[i] <- world
 			newWorld = append(newWorld, <-workerOutputs[i]...)
 		}
+		c.events <- TurnComplete{CompletedTurns: turn}
 		world = newWorld
 	}
 

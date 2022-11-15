@@ -45,6 +45,7 @@ func TestAlive(t *testing.T) {
 			turn++
 		case gol.AliveCellsCount:
 			var expected int
+			fmt.Println("CompletedTurns ", e.CompletedTurns, " turn ", turn)
 			if e.CompletedTurns != turn {
 				t.Fatalf("Expected turn to be %v, got %v instead", turn, e.CompletedTurns)
 			}
