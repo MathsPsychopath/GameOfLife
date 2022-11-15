@@ -161,6 +161,17 @@ func reportCellCount(input <-chan [][]byte, quit <-chan bool,
 	}
 }
 
+func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
+	c.ioCommand <- ioOutput
+	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turns))
+
+	for _, row := range world {
+		for _, cell := range row {
+			c.ioOutput <- cell
+		}
+	}
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
@@ -222,6 +233,9 @@ func distributor(p Params, c distributorChannels) {
 		c.events <- TurnComplete{CompletedTurns: turn}
 		world = newWorld
 	}
+
+	// Generate a PGM image at turn 100
+	generatePGM(p, c, world, turn)
 
 	// Get a slice of the alive cells
 	aliveCells := getAliveCells(world)
