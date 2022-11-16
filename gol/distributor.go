@@ -19,10 +19,10 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-// create a blak 2D slice of size p.ImageHeight x p.ImageWidth
+// create a blank 2D slice of size p.ImageHeight x p.ImageWidth
 func initialiseNewWorld(p Params) [][]byte {
 	world := make([][]byte, p.ImageHeight)
-	for i := range(world){
+	for i := range world {
 		world[i] = make([]byte, p.ImageWidth)
 	}
 	return world
@@ -31,7 +31,7 @@ func initialiseNewWorld(p Params) [][]byte {
 // parameterizable 2D slice creator (rows x columns)
 func createNewSlice(rows, columns int) [][]byte {
 	world := make([][]byte, rows)
-	for i := range(world){
+	for i := range world {
 		world[i] = make([]byte, columns)
 	}
 	return world
@@ -40,24 +40,25 @@ func createNewSlice(rows, columns int) [][]byte {
 // count the number of neighbours that a particular cell has in the world
 func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 	alive := 0
+	// positions of neighbouring cells relative to current cell
 	offsets := []util.Cell{
-		{X:-1,Y: -1},
-		{X:-1,Y: 0},
-		{X:-1,Y: 1},
-		{X:0, Y:-1},
-		{X:0, Y:1},
-		{X:1, Y:-1},
-		{X:1, Y:0},
-		{X:1, Y:1},
+		{X: -1, Y: -1},
+		{X: -1, Y: 0},
+		{X: -1, Y: 1},
+		{X: 0, Y: -1},
+		{X: 0, Y: 1},
+		{X: 1, Y: -1},
+		{X: 1, Y: 0},
+		{X: 1, Y: 1},
 	}
-	for _,offset := range offsets {
+	for _, offset := range offsets {
 		actualRow := (row + offset.X) % p.ImageHeight
 		if actualRow < 0 {
-			actualRow = p.ImageHeight - 1
+			actualRow = p.ImageHeight + actualRow
 		}
 		actualCol := (column + offset.Y) % p.ImageWidth
 		if actualCol < 0 {
-			actualCol = p.ImageWidth - 1
+			actualCol = p.ImageWidth + actualCol
 		}
 		if world[actualRow][actualCol] == 0xFF {
 			alive++
@@ -68,14 +69,14 @@ func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 
 // complete 1 iteration of the world following Game of Life rules
 func evolve(world [][]byte, p Params) [][]byte {
-	newWorld := initialiseNewWorld(p);
+	newWorld := initialiseNewWorld(p)
 	for i, row := range world {
 		for j := range row {
 			neighbours := getNeighbourCount(world, i, j, p)
-			if neighbours < 2 || neighbours > 3{
+			if neighbours < 2 || neighbours > 3 {
 				newWorld[i][j] = 0x00
 			} else {
-				if world[i][j] == 0x00 && neighbours == 3{
+				if world[i][j] == 0x00 && neighbours == 3 {
 					newWorld[i][j] = 0xFF
 					continue
 				}
@@ -88,14 +89,14 @@ func evolve(world [][]byte, p Params) [][]byte {
 
 // parameterizable evolve world
 func evolveParameterizable(world [][]byte, startRow, endRow int, p Params) [][]byte {
-	newPartition := createNewSlice(endRow - startRow, p.ImageWidth)
+	newPartition := createNewSlice(endRow-startRow, p.ImageWidth)
 	for i, k := startRow, 0; i < endRow; i, k = i+1, k+1 {
 		for j := 0; j < p.ImageWidth; j++ {
 			neighbours := getNeighbourCount(world, i, j, p)
-			if neighbours < 2 || neighbours > 3{
+			if neighbours < 2 || neighbours > 3 {
 				newPartition[k][j] = 0x00 //startRow is 8, but the new slice is relative to 0
 			} else {
-				if world[i][j] == 0x00 && neighbours == 3{
+				if world[i][j] == 0x00 && neighbours == 3 {
 					newPartition[k][j] = 0xFF
 					continue
 				}
@@ -110,10 +111,10 @@ func evolveParameterizable(world [][]byte, startRow, endRow int, p Params) [][]b
 func getAliveCells(world [][]byte) []util.Cell {
 	var aliveCells []util.Cell
 
-	for i, row := range(world) {
-		for j, cell := range(row) {
+	for i, row := range world {
+		for j, cell := range row {
 			if cell == 0xFF {
-				aliveCells = append(aliveCells, util.Cell{X:j, Y:i})
+				aliveCells = append(aliveCells, util.Cell{X: j, Y: i})
 			}
 		}
 	}
@@ -123,8 +124,8 @@ func getAliveCells(world [][]byte) []util.Cell {
 // get the number of alive cells
 func getAliveCellsCount(world [][]byte) int {
 	count := 0
-	for _, row := range(world) {
-		for _, cell := range(row) {
+	for _, row := range world {
+		for _, cell := range row {
 			if cell == 0xFF {
 				count++
 			}
@@ -137,15 +138,15 @@ func getAliveCellsCount(world [][]byte) int {
 func worker(startY, endY int, p Params,
 	input <-chan [][]byte, output chan [][]byte) {
 	for i := 0; i < p.Turns; i++ {
-		oldWorld := <- input
+		oldWorld := <-input
 		newWorld := evolveParameterizable(oldWorld, startY, endY, p)
 		output <- newWorld
 	}
 }
 
-func reportCellCount(input <-chan [][]byte, quit <-chan bool, 
-	events chan<- Event, completedTurns <-chan int){
-	ticker:= time.NewTicker(2*time.Second)
+func reportCellCount(input <-chan [][]byte, quit <-chan bool,
+	events chan<- Event, completedTurns <-chan int) {
+	ticker := time.NewTicker(2 * time.Second)
 
 	for {
 		select {
@@ -182,29 +183,28 @@ func distributor(p Params, c distributorChannels) {
 
 	// define the worker arguments
 	segments := p.ImageHeight / p.Threads
-	workerInputs := []chan [][]byte {}
-	workerOutputs := []chan [][]byte {}
-	
+	workerInputs := []chan [][]byte{}
+	workerOutputs := []chan [][]byte{}
+
 	// Initialise the worker threads
 	for i := 0; i < p.Threads; i++ {
 		input := make(chan [][]byte)
 		output := make(chan [][]byte)
 		workerInputs = append(workerInputs, input)
 		workerOutputs = append(workerOutputs, output)
-		if i == p.Threads - 1 {
+		if i == p.Threads-1 {
 			go worker(i*segments, p.ImageHeight, p, input, output)
 		} else {
-			go worker(i * segments, (i+1) * segments, p, input, output)
+			go worker(i*segments, (i+1)*segments, p, input, output)
 		}
 
 	}
-	
-	
+
 	// TODO: initialise the 2D slice
 	world := createNewSlice(p.ImageHeight, p.ImageWidth)
 
 	// TODO: Populate blank 2D slice with world data from input
-	for i := 0; i < p.ImageHeight; i++{
+	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
 			world[i][j] = <-c.ioInput
 		}
@@ -218,8 +218,8 @@ func distributor(p Params, c distributorChannels) {
 
 	// TODO: Execute all turns of the Game of Life.
 	turn := 0
-	for ;turn < p.Turns; turn++  {
-		newWorld := [][]byte {}
+	for ; turn < p.Turns; turn++ {
+		newWorld := [][]byte{}
 		// non-blocking send
 		select {
 		case worldChannel <- world:
@@ -248,7 +248,7 @@ func distributor(p Params, c distributorChannels) {
 	<-c.ioIdle
 
 	c.events <- StateChange{turn, Quitting}
-	
+
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
