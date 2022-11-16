@@ -135,11 +135,11 @@ func getAliveCellsCount(world [][]byte) int {
 }
 
 // create a worker assigned to a segment of the image
-func worker(startY, endY int, p Params,
+func worker(startRow, endRow int, p Params,
 	input <-chan [][]byte, output chan [][]byte) {
 	for i := 0; i < p.Turns; i++ {
 		oldWorld := <-input
-		newWorld := evolveParameterizable(oldWorld, startY, endY, p)
+		newWorld := evolveParameterizable(oldWorld, startRow, endRow, p)
 		output <- newWorld
 	}
 }
@@ -182,7 +182,7 @@ func distributor(p Params, c distributorChannels) {
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight))
 
 	// define the worker arguments
-	segments := p.ImageHeight / p.Threads
+	segmentSize := p.ImageHeight / p.Threads
 	workerInputs := []chan [][]byte{}
 	workerOutputs := []chan [][]byte{}
 
@@ -193,17 +193,18 @@ func distributor(p Params, c distributorChannels) {
 		workerInputs = append(workerInputs, input)
 		workerOutputs = append(workerOutputs, output)
 		if i == p.Threads-1 {
-			go worker(i*segments, p.ImageHeight, p, input, output)
+			// row-count of last segment might be different than previous segments, so we pass the rest of the rows.
+			go worker(i*segmentSize, p.ImageHeight, p, input, output)
 		} else {
-			go worker(i*segments, (i+1)*segments, p, input, output)
+			go worker(i*segmentSize, (i+1)*segmentSize, p, input, output)
 		}
 
 	}
 
-	// TODO: initialise the 2D slice
+	// TODO: initialise the world
 	world := createNewSlice(p.ImageHeight, p.ImageWidth)
 
-	// TODO: Populate blank 2D slice with world data from input
+	// TODO: Populate blank world with world data from input
 	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
 			world[i][j] = <-c.ioInput
