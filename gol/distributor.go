@@ -92,9 +92,10 @@ func evolveParameterizable(world [][]byte, startRow, endRow int, p Params) [][]b
 	newPartition := createNewSlice(endRow-startRow, p.ImageWidth)
 	for i, k := startRow, 0; i < endRow; i, k = i+1, k+1 {
 		for j := 0; j < p.ImageWidth; j++ {
+			// k = i-startRow is always true. k is just the current row relative to the slice.
 			neighbours := getNeighbourCount(world, i, j, p)
 			if neighbours < 2 || neighbours > 3 {
-				newPartition[k][j] = 0x00 //startRow is 8, but the new slice is relative to 0
+				newPartition[k][j] = 0x00
 			} else {
 				if world[i][j] == 0x00 && neighbours == 3 {
 					newPartition[k][j] = 0xFF
@@ -227,6 +228,7 @@ func distributor(p Params, c distributorChannels) {
 			turnChannel <- turn
 		default:
 		}
+		//could the above be changed to an if statement?
 		for i := 0; i < p.Threads; i++ {
 			workerInputs[i] <- world
 		}
