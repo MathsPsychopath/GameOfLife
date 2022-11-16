@@ -4,8 +4,8 @@ import (
 	// "fmt"
 	// "strconv"
 
-	"fmt"
 	"strconv"
+	"time"
 
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -28,7 +28,16 @@ func initialiseNewWorld(p Params) [][]byte {
 	return world
 }
 
-// count the number of (alive) neighbours that a particular cell has in the world
+// parameterizable 2D slice creator (rows x columns)
+func createNewSlice(rows, columns int) [][]byte {
+	world := make([][]byte, rows)
+	for i := range world {
+		world[i] = make([]byte, columns)
+	}
+	return world
+}
+
+// count the number of neighbours that a particular cell has in the world
 func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 	alive := 0
 	// positions of neighbouring cells relative to current cell
@@ -78,6 +87,26 @@ func evolve(world [][]byte, p Params) [][]byte {
 	return newWorld
 }
 
+// parameterizable evolve world
+func evolveParameterizable(world [][]byte, startRow, endRow int, p Params) [][]byte {
+	newPartition := createNewSlice(endRow-startRow, p.ImageWidth)
+	for i, k := startRow, 0; i < endRow; i, k = i+1, k+1 {
+		for j := 0; j < p.ImageWidth; j++ {
+			neighbours := getNeighbourCount(world, i, j, p)
+			if neighbours < 2 || neighbours > 3 {
+				newPartition[k][j] = 0x00 //startRow is 8, but the new slice is relative to 0
+			} else {
+				if world[i][j] == 0x00 && neighbours == 3 {
+					newPartition[k][j] = 0xFF
+					continue
+				}
+				newPartition[k][j] = world[i][j]
+			}
+		}
+	}
+	return newPartition
+}
+
 // get a list of the alive cells existing in the world
 func getAliveCells(world [][]byte) []util.Cell {
 	var aliveCells []util.Cell
@@ -92,6 +121,58 @@ func getAliveCells(world [][]byte) []util.Cell {
 	return aliveCells
 }
 
+// get the number of alive cells
+func getAliveCellsCount(world [][]byte) int {
+	count := 0
+	for _, row := range world {
+		for _, cell := range row {
+			if cell == 0xFF {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// create a worker assigned to a segment of the image
+func worker(startRow, endRow int, p Params,
+	input <-chan [][]byte, output chan [][]byte) {
+	for i := 0; i < p.Turns; i++ {
+		oldWorld := <-input
+		newWorld := evolveParameterizable(oldWorld, startRow, endRow, p)
+		output <- newWorld
+	}
+}
+
+func reportCellCount(input <-chan [][]byte, quit <-chan bool,
+	events chan<- Event, completedTurns <-chan int) {
+	ticker := time.NewTicker(2 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			world := <-input
+			turn := <-completedTurns
+			alive := getAliveCellsCount(world)
+			events <- AliveCellsCount{CellsCount: alive, CompletedTurns: turn}
+		case <-quit:
+			ticker.Stop()
+			return
+		}
+	}
+}
+
+func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
+	c.ioCommand <- ioOutput
+	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turns))
+
+	for _, row := range world {
+		for _, cell := range row {
+			c.ioOutput <- cell
+		}
+	}
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
@@ -99,22 +180,66 @@ func distributor(p Params, c distributorChannels) {
 	c.ioCommand <- ioInput
 	// e.g., 64x64, 128x128 etc.
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight))
-	fmt.Println("filename: ", (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)))
-	// TODO: Create a 2D slice to store the world and populate it
-	world := initialiseNewWorld(p)
 
-	// TODO: Populate blank 2D slice with world data from input
+	// define the worker arguments
+	segmentSize := p.ImageHeight / p.Threads
+	workerInputs := []chan [][]byte{}
+	workerOutputs := []chan [][]byte{}
+
+	// Initialise the worker threads
+	for i := 0; i < p.Threads; i++ {
+		input := make(chan [][]byte)
+		output := make(chan [][]byte)
+		workerInputs = append(workerInputs, input)
+		workerOutputs = append(workerOutputs, output)
+		if i == p.Threads-1 {
+			// row-count of last segment might be different than previous segments, so we pass the rest of the rows.
+			go worker(i*segmentSize, p.ImageHeight, p, input, output)
+		} else {
+			go worker(i*segmentSize, (i+1)*segmentSize, p, input, output)
+		}
+
+	}
+
+	// TODO: initialise the world
+	world := createNewSlice(p.ImageHeight, p.ImageWidth)
+
+	// TODO: Populate blank world with world data from input
 	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
 			world[i][j] = <-c.ioInput
 		}
 	}
 
-	turn := 0
+	// start ticker to indicate alive cells
+	worldChannel := make(chan [][]byte)
+	turnChannel := make(chan int)
+	quit := make(chan bool)
+	go reportCellCount(worldChannel, quit, c.events, turnChannel)
+
 	// TODO: Execute all turns of the Game of Life.
+	turn := 0
 	for ; turn < p.Turns; turn++ {
-		world = evolve(world, p)
+		newWorld := [][]byte{}
+		// non-blocking send
+		select {
+		case worldChannel <- world:
+			turnChannel <- turn
+		default:
+		}
+		for i := 0; i < p.Threads; i++ {
+			workerInputs[i] <- world
+		}
+		for i := 0; i < p.Threads; i++ {
+			newWorld = append(newWorld, <-workerOutputs[i]...)
+		}
+
+		c.events <- TurnComplete{CompletedTurns: turn}
+		world = newWorld
 	}
+
+	// Generate a PGM image at turn 100
+	generatePGM(p, c, world, turn)
 
 	// Get a slice of the alive cells
 	aliveCells := getAliveCells(world)
