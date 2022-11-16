@@ -229,8 +229,11 @@ func distributor(p Params, c distributorChannels) {
 		}
 		for i := 0; i < p.Threads; i++ {
 			workerInputs[i] <- world
+		}
+		for i := 0; i < p.Threads; i++ {
 			newWorld = append(newWorld, <-workerOutputs[i]...)
 		}
+
 		c.events <- TurnComplete{CompletedTurns: turn}
 		world = newWorld
 	}
