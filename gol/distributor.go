@@ -4,6 +4,7 @@ import (
 	// "fmt"
 	// "strconv"
 
+	"fmt"
 	"strconv"
 
 	"uk.ac.bris.cs/gameoflife/util"
@@ -18,36 +19,37 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-// create a blak 2D slice of size p.ImageHeight x p.ImageWidth
+// create a blank 2D slice of size p.ImageHeight x p.ImageWidth
 func initialiseNewWorld(p Params) [][]byte {
 	world := make([][]byte, p.ImageHeight)
-	for i := range(world){
+	for i := range world {
 		world[i] = make([]byte, p.ImageWidth)
 	}
 	return world
 }
 
-// count the number of neighbours that a particular cell has in the world
+// count the number of (alive) neighbours that a particular cell has in the world
 func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 	alive := 0
+	// positions of neighbouring cells relative to current cell
 	offsets := []util.Cell{
-		{X:-1,Y: -1},
-		{X:-1,Y: 0},
-		{X:-1,Y: 1},
-		{X:0, Y:-1},
-		{X:0, Y:1},
-		{X:1, Y:-1},
-		{X:1, Y:0},
-		{X:1, Y:1},
+		{X: -1, Y: -1},
+		{X: -1, Y: 0},
+		{X: -1, Y: 1},
+		{X: 0, Y: -1},
+		{X: 0, Y: 1},
+		{X: 1, Y: -1},
+		{X: 1, Y: 0},
+		{X: 1, Y: 1},
 	}
-	for _,offset := range offsets {
+	for _, offset := range offsets {
 		actualRow := (row + offset.X) % p.ImageHeight
 		if actualRow < 0 {
-			actualRow = p.ImageHeight - 1
+			actualRow = p.ImageHeight + actualRow
 		}
 		actualCol := (column + offset.Y) % p.ImageWidth
 		if actualCol < 0 {
-			actualCol = p.ImageWidth - 1
+			actualCol = p.ImageWidth + actualCol
 		}
 		if world[actualRow][actualCol] == 0xFF {
 			alive++
@@ -58,14 +60,14 @@ func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 
 // complete 1 iteration of the world following Game of Life rules
 func evolve(world [][]byte, p Params) [][]byte {
-	newWorld := initialiseNewWorld(p);
+	newWorld := initialiseNewWorld(p)
 	for i, row := range world {
 		for j := range row {
 			neighbours := getNeighbourCount(world, i, j, p)
-			if neighbours < 2 || neighbours > 3{
+			if neighbours < 2 || neighbours > 3 {
 				newWorld[i][j] = 0x00
 			} else {
-				if world[i][j] == 0x00 && neighbours == 3{
+				if world[i][j] == 0x00 && neighbours == 3 {
 					newWorld[i][j] = 0xFF
 					continue
 				}
@@ -80,16 +82,15 @@ func evolve(world [][]byte, p Params) [][]byte {
 func getAliveCells(world [][]byte) []util.Cell {
 	var aliveCells []util.Cell
 
-	for i, row := range(world) {
-		for j, cell := range(row) {
+	for i, row := range world {
+		for j, cell := range row {
 			if cell == 0xFF {
-				aliveCells = append(aliveCells, util.Cell{X:j, Y:i})
+				aliveCells = append(aliveCells, util.Cell{X: j, Y: i})
 			}
 		}
 	}
 	return aliveCells
 }
-
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
@@ -98,12 +99,12 @@ func distributor(p Params, c distributorChannels) {
 	c.ioCommand <- ioInput
 	// e.g., 64x64, 128x128 etc.
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight))
-
+	fmt.Println("filename: ", (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)))
 	// TODO: Create a 2D slice to store the world and populate it
 	world := initialiseNewWorld(p)
 
 	// TODO: Populate blank 2D slice with world data from input
-	for i := 0; i < p.ImageHeight; i++{
+	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
 			world[i][j] = <-c.ioInput
 		}
@@ -111,8 +112,8 @@ func distributor(p Params, c distributorChannels) {
 
 	turn := 0
 	// TODO: Execute all turns of the Game of Life.
-	for ;turn < p.Turns; turn++  {
-		world = evolve(world, p);
+	for ; turn < p.Turns; turn++ {
+		world = evolve(world, p)
 	}
 
 	// Get a slice of the alive cells
@@ -126,7 +127,7 @@ func distributor(p Params, c distributorChannels) {
 	<-c.ioIdle
 
 	c.events <- StateChange{turn, Quitting}
-	
+
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
