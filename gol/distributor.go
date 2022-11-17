@@ -204,12 +204,14 @@ func distributor(p Params, c distributorChannels) {
 		output := make(chan [][]byte)
 		workerInputs = append(workerInputs, input)
 		workerOutputs = append(workerOutputs, output)
+		startRow := i * segmentSize
+		var endRow int
 		if i == p.Threads-1 {
-			// row-count of last segment might be different than previous segments, so we pass the rest of the rows.
-			go worker(i*segmentSize, p.ImageHeight, p, input, output)
+			endRow = p.ImageHeight
 		} else {
-			go worker(i*segmentSize, (i+1)*segmentSize, p, input, output)
+			endRow = (i + 1) * segmentSize
 		}
+		go worker(startRow, endRow, p, input, output)
 
 	}
 
@@ -234,6 +236,7 @@ func distributor(p Params, c distributorChannels) {
 	for ; turn < p.Turns; turn++ {
 		newWorld := [][]byte{}
 		// non-blocking send
+		// update turn and world data for ticker
 		select {
 		case worldChannel <- world:
 			turnChannel <- turn
