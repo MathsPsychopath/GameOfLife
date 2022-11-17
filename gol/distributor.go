@@ -104,7 +104,7 @@ func getNextCell(slice HorSlice, i, j, neighbourCount int) uint8 {
 }
 
 // parameterizable evolve slice.grid
-func evolveSlice(slice HorSlice, p Params) [][]byte {
+func evolveSlice(slice HorSlice, p Params, c distributorChannels, turn int) [][]byte {
 	// create empty slice
 	newSlice := createNewSlice(slice.endRow-slice.startRow, p.ImageWidth)
 	// iterate through cells of slice of the oldGrid
@@ -112,15 +112,20 @@ func evolveSlice(slice HorSlice, p Params) [][]byte {
 		for j := 0; j < p.ImageWidth; j++ {
 			neighbourCount := getNeighbourCount(slice.grid, i, j, p)
 			// get new value for cell and append to newSlice
-			newSlice[i-slice.startRow][j] = getNextCell(slice, i, j, neighbourCount)
+			updatedCell := getNextCell(slice, i, j, neighbourCount)
+			newSlice[i-slice.startRow][j] = updatedCell
+			// cellFlipped event
+			if updatedCell != slice.grid[i][j] {
+				c.events <- CellFlipped{turn, util.Cell{j, i}}
+			}
 		}
 	}
 	return newSlice
 }
 
 // create a worker assigned to a segment of the image
-func worker(slice HorSlice, p Params, output chan HorSlice) {
-	newSlice := evolveSlice(slice, p)
+func worker(slice HorSlice, p Params, output chan HorSlice, c distributorChannels, turn int) {
+	newSlice := evolveSlice(slice, p, c, turn)
 	output <- HorSlice{newSlice, slice.startRow, slice.endRow}
 }
 
@@ -151,24 +156,6 @@ func getAliveCellsCount(world [][]byte) int {
 	return count
 }
 
-func reportCellCount(input <-chan [][]byte, quit <-chan bool,
-	events chan<- Event, completedTurns <-chan int) {
-	ticker := time.NewTicker(2 * time.Second)
-
-	for {
-		select {
-		case <-ticker.C:
-			world := <-input
-			turn := <-completedTurns
-			alive := getAliveCellsCount(world)
-			events <- AliveCellsCount{CellsCount: alive, CompletedTurns: turn}
-		case <-quit:
-			ticker.Stop()
-			return
-		}
-	}
-}
-
 func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
 	c.ioCommand <- ioOutput
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turns))
@@ -180,7 +167,7 @@ func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
 	}
 }
 
-func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i int) {
+func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i int, c distributorChannels, turn int) {
 	// i is current thread
 	segmentSize := p.ImageHeight / p.Threads
 	startRow := i * segmentSize
@@ -191,7 +178,17 @@ func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i i
 		endRow = (i + 1) * segmentSize
 	}
 	slice := HorSlice{world, startRow, endRow}
-	go worker(slice, p, outputChannel)
+	go worker(slice, p, outputChannel, c, turn)
+}
+
+func checkTicker(ticker *time.Ticker, world [][]byte, turn int, c distributorChannels) {
+	select {
+	case <-ticker.C:
+		alive := getAliveCellsCount(world)
+		c.events <- AliveCellsCount{CellsCount: alive, CompletedTurns: turn}
+	default:
+	}
+
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -209,14 +206,14 @@ func distributor(p Params, c distributorChannels) {
 	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
 			world[i][j] = <-c.ioInput
+			if world[i][j] == 0xFF {
+				c.events <- CellFlipped{0, util.Cell{j, i}}
+			}
 		}
 	}
 
 	// start ticker to indicate alive cells
-	worldChannel := make(chan [][]byte)
-	turnChannel := make(chan int)
-	quit := make(chan bool)
-	go reportCellCount(worldChannel, quit, c.events, turnChannel)
+	ticker := time.NewTicker(2 * time.Second)
 
 	// TODO: Execute all turns of the Game of Life.
 	turn := 0
@@ -225,24 +222,13 @@ func distributor(p Params, c distributorChannels) {
 	var waitgroup sync.WaitGroup
 	for ; turn < p.Turns; turn++ {
 		newWorld := createNewSlice(p.ImageHeight, p.ImageWidth)
-		// non-blocking send
-		// update turn and world data for ticker
-		select {
-		case worldChannel <- world:
-			turnChannel <- turn
-		default:
-		}
-		// could the above be changed to an if statement?
+
 		// Initialise the worker threads
 		for tr := 0; tr < p.Threads; tr++ {
-			initialiseWorker(world, workerOutputChannel, p, tr)
+			initialiseWorker(world, workerOutputChannel, p, tr, c, turn)
 		}
-		// goes through each thread one by one, waiting to receive a slice of the new world.
 		for tr := 0; tr < p.Threads; tr++ {
-			// TODO: improve by appending worker outputs in any order
-			// this blocks until next thread is finished
 			newSlice := <-workerOutputChannel
-			// fmt.Printf("\nchan len: %d\n", len(workerOutputChannel))
 			waitgroup.Add(1)
 			go func() {
 				for i := newSlice.startRow; i < newSlice.endRow; i++ {
@@ -254,16 +240,22 @@ func distributor(p Params, c distributorChannels) {
 			}()
 		}
 		waitgroup.Wait()
-		c.events <- TurnComplete{turn}
-		// updates world
+
 		// fmt.Print("old:\n")
 		// util.VisualiseSquare(world, p.ImageWidth, p.ImageHeight)
 		// fmt.Print("new:\n")
 		// util.VisualiseSquare(newWorld, p.ImageWidth, p.ImageHeight)
 
 		// time.Sleep(500 * time.Millisecond)
+
+		// updates world
 		world = newWorld
-		assertChannelEmpty(workerOutputChannel, p, turn)
+		c.events <- TurnComplete{turn}
+		//temp
+		// assertChannelEmpty(workerOutputChannel, p, turn)
+
+		// checking if ticker has ticked
+		checkTicker(ticker, world, turn+1, c)
 	}
 	close(workerOutputChannel)
 	// Generate a PGM image at turn 100
@@ -283,6 +275,7 @@ func distributor(p Params, c distributorChannels) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+	ticker.Stop()
 }
 
 //asserts
