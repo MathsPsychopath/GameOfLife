@@ -9,6 +9,14 @@ func VisualiseMatrix(given [][]uint8, width, height int) {
 	fmt.Print(matricesToString(given, nil, width, height))
 }
 
+func VisualiseSquareDouble(old, new [][]uint8, width, height int) {
+	fmt.Print(squaresToStrings(old, new, width, height))
+}
+
+func VisualiseSquare(grid [][]uint8, width, height int) {
+	fmt.Print(squaresToStrings(grid, nil, width, height))
+}
+
 func (c1 Cell) in(slice []Cell) bool {
 	for _, c2 := range slice {
 		if c1 == c2 {
@@ -81,7 +89,7 @@ func squaresToStrings(given, expected [][]uint8, width, height int) []string {
 		for j := 0; j < width; j++ {
 			if given[i][j] == 0xFF {
 				output = append(output, "██")
-			} else if given [i][j] == 0x00 {
+			} else if given[i][j] == 0x00 {
 				output = append(output, "  ")
 			}
 		}

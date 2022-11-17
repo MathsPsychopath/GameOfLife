@@ -1,13 +1,13 @@
 package gol
 
 import (
-	// "fmt"
-	// "strconv"
-
+	"fmt"
+	"os"
 	"strconv"
+	"sync"
 	"time"
 
-	"uk.ac.bris.cs/gameoflife/util"
+	util "uk.ac.bris.cs/gameoflife/util"
 )
 
 type HorSlice struct {
@@ -118,6 +118,12 @@ func evolveSlice(slice HorSlice, p Params) [][]byte {
 	return newSlice
 }
 
+// create a worker assigned to a segment of the image
+func worker(slice HorSlice, p Params, output chan HorSlice) {
+	newSlice := evolveSlice(slice, p)
+	output <- HorSlice{newSlice, slice.startRow, slice.endRow}
+}
+
 // get a list of the alive cells existing in the world
 func getAliveCells(world [][]byte) []util.Cell {
 	var aliveCells []util.Cell
@@ -143,17 +149,6 @@ func getAliveCellsCount(world [][]byte) int {
 		}
 	}
 	return count
-}
-
-// create a worker assigned to a segment of the image
-func worker(startRow, endRow int, p Params,
-	input <-chan [][]byte, output chan [][]byte) {
-	for i := 0; i < p.Turns; i++ {
-		oldWorld := <-input
-		slice := HorSlice{oldWorld, startRow, endRow}
-		newWorld := evolveSlice(slice, p)
-		output <- newWorld
-	}
 }
 
 func reportCellCount(input <-chan [][]byte, quit <-chan bool,
@@ -185,6 +180,20 @@ func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
 	}
 }
 
+func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i int) {
+	// i is current thread
+	segmentSize := p.ImageHeight / p.Threads
+	startRow := i * segmentSize
+	var endRow int
+	if i == p.Threads-1 {
+		endRow = p.ImageHeight
+	} else {
+		endRow = (i + 1) * segmentSize
+	}
+	slice := HorSlice{world, startRow, endRow}
+	go worker(slice, p, outputChannel)
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
@@ -192,28 +201,6 @@ func distributor(p Params, c distributorChannels) {
 	c.ioCommand <- ioInput
 	// e.g., 64x64, 128x128 etc.
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight))
-
-	// define the worker arguments
-	segmentSize := p.ImageHeight / p.Threads
-	workerInputs := []chan [][]byte{}
-	workerOutputs := []chan [][]byte{}
-
-	// Initialise the worker threads
-	for i := 0; i < p.Threads; i++ {
-		input := make(chan [][]byte)
-		output := make(chan [][]byte)
-		workerInputs = append(workerInputs, input)
-		workerOutputs = append(workerOutputs, output)
-		startRow := i * segmentSize
-		var endRow int
-		if i == p.Threads-1 {
-			endRow = p.ImageHeight
-		} else {
-			endRow = (i + 1) * segmentSize
-		}
-		go worker(startRow, endRow, p, input, output)
-
-	}
 
 	// TODO: initialise the world
 	world := createNewSlice(p.ImageHeight, p.ImageWidth)
@@ -233,8 +220,15 @@ func distributor(p Params, c distributorChannels) {
 
 	// TODO: Execute all turns of the Game of Life.
 	turn := 0
+	// creating channels
+	workerOutputChannel := make(chan HorSlice, p.Threads)
+	var waitgroup sync.WaitGroup
 	for ; turn < p.Turns; turn++ {
-		newWorld := [][]byte{}
+		newWorld := make([][]byte, p.ImageHeight)
+		for i := 0; i < p.ImageHeight; i++ {
+			newWorld[i] = make([]byte, p.ImageWidth)
+		}
+
 		// non-blocking send
 		// update turn and world data for ticker
 		select {
@@ -243,22 +237,39 @@ func distributor(p Params, c distributorChannels) {
 		default:
 		}
 		// could the above be changed to an if statement?
-		// sends old world to each thread, starting their work on the new world
-		for i := 0; i < p.Threads; i++ {
-			workerInputs[i] <- world
+		// Initialise the worker threads
+		for tr := 0; tr < p.Threads; tr++ {
+			initialiseWorker(world, workerOutputChannel, p, tr)
 		}
 		// goes through each thread one by one, waiting to receive a slice of the new world.
-		for i := 0; i < p.Threads; i++ {
+		for tr := 0; tr < p.Threads; tr++ {
 			// TODO: improve by appending worker outputs in any order
 			// this blocks until next thread is finished
-			newWorld = append(newWorld, <-workerOutputs[i]...)
+			newSlice := <-workerOutputChannel
+			// fmt.Printf("\nchan len: %d\n", len(workerOutputChannel))
+			waitgroup.Add(1)
+			go func() {
+				defer waitgroup.Done()
+				for i := newSlice.startRow; i < newSlice.endRow; i++ {
+					for j := 0; j < p.ImageHeight; j++ {
+						newWorld[i][j] = newSlice.grid[i-newSlice.startRow][j]
+					}
+				}
+			}()
 		}
-
+		waitgroup.Wait()
 		c.events <- TurnComplete{CompletedTurns: turn}
 		// updates world
-		world = newWorld
-	}
+		// fmt.Print("old:\n")
+		// util.VisualiseSquare(world, p.ImageWidth, p.ImageHeight)
+		// fmt.Print("new:\n")
+		// util.VisualiseSquare(newWorld, p.ImageWidth, p.ImageHeight)
 
+		// time.Sleep(500 * time.Millisecond)
+		world = newWorld
+		assertChannelEmpty(workerOutputChannel, p, turn)
+	}
+	close(workerOutputChannel)
 	// Generate a PGM image at turn 100
 	generatePGM(p, c, world, turn)
 
@@ -276,4 +287,17 @@ func distributor(p Params, c distributorChannels) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+
+//asserts
+func assertChannelEmpty(channel chan HorSlice, p Params, turn int) {
+	if len(channel) != 0 {
+		fmt.Printf("\n\n\nchannel not empty!!!!\n\n\n")
+		fmt.Printf("channel length: %d\n", len(channel))
+		temp := <-channel
+		fmt.Printf("\n\n\nchannel item start row %d end row %d \n\n\n", temp.startRow, temp.endRow)
+		fmt.Printf("turns total: %d\n\n", p.Turns)
+		fmt.Printf("current turn: %d\n\n", turn)
+		os.Exit(1)
+	}
 }
