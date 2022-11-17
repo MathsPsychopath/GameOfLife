@@ -10,6 +10,12 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
+type HorSlice struct {
+	grid     [][]byte
+	startRow int
+	endRow   int
+}
+
 type distributorChannels struct {
 	events     chan<- Event
 	ioCommand  chan<- ioCommand
@@ -87,21 +93,21 @@ func evolve(world [][]byte, p Params) [][]byte {
 	return newWorld
 }
 
-// parameterizable evolve world
-func evolveParameterizable(world [][]byte, startRow, endRow int, p Params) [][]byte {
-	newPartition := createNewSlice(endRow-startRow, p.ImageWidth)
-	for i, k := startRow, 0; i < endRow; i, k = i+1, k+1 {
+// parameterizable evolve slice.grid
+func evolveParameterizable(slice HorSlice, p Params) [][]byte {
+	newPartition := createNewSlice(slice.endRow-slice.startRow, p.ImageWidth)
+	for i, k := slice.startRow, 0; i < slice.endRow; i, k = i+1, k+1 {
 		for j := 0; j < p.ImageWidth; j++ {
-			// k = i-startRow is always true. k is just the current row relative to the slice.
-			neighbours := getNeighbourCount(world, i, j, p)
+			// k = i-slice.startRow is always true. k is just the current row relative to the slice.
+			neighbours := getNeighbourCount(slice.grid, i, j, p)
 			if neighbours < 2 || neighbours > 3 {
 				newPartition[k][j] = 0x00
 			} else {
-				if world[i][j] == 0x00 && neighbours == 3 {
+				if slice.grid[i][j] == 0x00 && neighbours == 3 {
 					newPartition[k][j] = 0xFF
 					continue
 				}
-				newPartition[k][j] = world[i][j]
+				newPartition[k][j] = slice.grid[i][j]
 			}
 		}
 	}
@@ -140,7 +146,8 @@ func worker(startRow, endRow int, p Params,
 	input <-chan [][]byte, output chan [][]byte) {
 	for i := 0; i < p.Turns; i++ {
 		oldWorld := <-input
-		newWorld := evolveParameterizable(oldWorld, startRow, endRow, p)
+		slice := HorSlice{oldWorld, startRow, endRow}
+		newWorld := evolveParameterizable(slice, p)
 		output <- newWorld
 	}
 }
