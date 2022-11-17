@@ -8,6 +8,7 @@ import (
 	util "uk.ac.bris.cs/gameoflife/util"
 )
 
+// type to reduce # of individual channels
 type HorSlice struct {
 	grid     [][]byte
 	startRow int
@@ -62,6 +63,7 @@ func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 	return alive
 }
 
+// apply GOL rules and return the result for given cell
 func getNextCell(slice HorSlice, i, j, neighbourCount int) uint8 {
 	if neighbourCount < 2 || neighbourCount > 3 {
 		return 0x00
@@ -125,6 +127,7 @@ func getAliveCellsCount(world [][]byte) int {
 	return count
 }
 
+// generate PGM file using ioCommand
 func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
 	c.ioCommand <- ioOutput
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turns))
@@ -136,6 +139,7 @@ func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
 	}
 }
 
+// start worker threads to work on specific sections given params
 func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i int, c distributorChannels, turn int) {
 	// i is current thread
 	segmentSize := p.ImageHeight / p.Threads
@@ -150,6 +154,7 @@ func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i i
 	go worker(slice, p, outputChannel, c, turn)
 }
 
+// send the AliveCellsCount event
 func checkTicker(ticker *time.Ticker, world [][]byte, turn int, c distributorChannels) {
 	select {
 	case <-ticker.C:
@@ -176,7 +181,7 @@ func distributor(p Params, c distributorChannels) {
 		for j := 0; j < p.ImageWidth; j++ {
 			world[i][j] = <-c.ioInput
 			if world[i][j] == 0xFF {
-				c.events <- CellFlipped{0, util.Cell{j, i}}
+				c.events <- CellFlipped{0, util.Cell{X: j, Y: i}}
 			}
 		}
 	}
