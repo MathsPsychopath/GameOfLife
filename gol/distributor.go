@@ -93,25 +93,29 @@ func evolve(world [][]byte, p Params) [][]byte {
 	return newWorld
 }
 
+func getNextCell(slice HorSlice, i, j, neighbourCount int) uint8 {
+	if neighbourCount < 2 || neighbourCount > 3 {
+		return 0x00
+	} else if slice.grid[i][j] == 0x00 && neighbourCount == 3 {
+		return 0xFF
+	} else {
+		return slice.grid[i][j]
+	}
+}
+
 // parameterizable evolve slice.grid
-func evolveParameterizable(slice HorSlice, p Params) [][]byte {
-	newPartition := createNewSlice(slice.endRow-slice.startRow, p.ImageWidth)
-	for i, k := slice.startRow, 0; i < slice.endRow; i, k = i+1, k+1 {
+func evolveSlice(slice HorSlice, p Params) [][]byte {
+	// create empty slice
+	newSlice := createNewSlice(slice.endRow-slice.startRow, p.ImageWidth)
+	// iterate through cells of slice of the oldGrid
+	for i := slice.startRow; i < slice.endRow; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
-			// k = i-slice.startRow is always true. k is just the current row relative to the slice.
-			neighbours := getNeighbourCount(slice.grid, i, j, p)
-			if neighbours < 2 || neighbours > 3 {
-				newPartition[k][j] = 0x00
-			} else {
-				if slice.grid[i][j] == 0x00 && neighbours == 3 {
-					newPartition[k][j] = 0xFF
-					continue
-				}
-				newPartition[k][j] = slice.grid[i][j]
-			}
+			neighbourCount := getNeighbourCount(slice.grid, i, j, p)
+			// get new value for cell and append to newSlice
+			newSlice[i-slice.startRow][j] = getNextCell(slice, i, j, neighbourCount)
 		}
 	}
-	return newPartition
+	return newSlice
 }
 
 // get a list of the alive cells existing in the world
@@ -147,7 +151,7 @@ func worker(startRow, endRow int, p Params,
 	for i := 0; i < p.Turns; i++ {
 		oldWorld := <-input
 		slice := HorSlice{oldWorld, startRow, endRow}
-		newWorld := evolveParameterizable(slice, p)
+		newWorld := evolveSlice(slice, p)
 		output <- newWorld
 	}
 }
@@ -235,15 +239,20 @@ func distributor(p Params, c distributorChannels) {
 			turnChannel <- turn
 		default:
 		}
-		//could the above be changed to an if statement?
+		// could the above be changed to an if statement?
+		// sends old world to each thread, starting their work on the new world
 		for i := 0; i < p.Threads; i++ {
 			workerInputs[i] <- world
 		}
+		// goes through each thread one by one, waiting to receive a slice of the new world.
 		for i := 0; i < p.Threads; i++ {
+			// TODO: improve by appending worker outputs in any order
+			// this blocks until next thread is finished
 			newWorld = append(newWorld, <-workerOutputs[i]...)
 		}
 
 		c.events <- TurnComplete{CompletedTurns: turn}
+		// updates world
 		world = newWorld
 	}
 
