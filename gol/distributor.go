@@ -224,11 +224,7 @@ func distributor(p Params, c distributorChannels) {
 	workerOutputChannel := make(chan HorSlice, p.Threads)
 	var waitgroup sync.WaitGroup
 	for ; turn < p.Turns; turn++ {
-		newWorld := make([][]byte, p.ImageHeight)
-		for i := 0; i < p.ImageHeight; i++ {
-			newWorld[i] = make([]byte, p.ImageWidth)
-		}
-
+		newWorld := createNewSlice(p.ImageHeight, p.ImageWidth)
 		// non-blocking send
 		// update turn and world data for ticker
 		select {
@@ -249,16 +245,16 @@ func distributor(p Params, c distributorChannels) {
 			// fmt.Printf("\nchan len: %d\n", len(workerOutputChannel))
 			waitgroup.Add(1)
 			go func() {
-				defer waitgroup.Done()
 				for i := newSlice.startRow; i < newSlice.endRow; i++ {
 					for j := 0; j < p.ImageHeight; j++ {
 						newWorld[i][j] = newSlice.grid[i-newSlice.startRow][j]
 					}
 				}
+				waitgroup.Done()
 			}()
 		}
 		waitgroup.Wait()
-		c.events <- TurnComplete{CompletedTurns: turn}
+		c.events <- TurnComplete{turn}
 		// updates world
 		// fmt.Print("old:\n")
 		// util.VisualiseSquare(world, p.ImageWidth, p.ImageHeight)
