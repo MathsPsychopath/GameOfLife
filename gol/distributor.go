@@ -1,8 +1,6 @@
 package gol
 
 import (
-	"fmt"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -23,15 +21,6 @@ type distributorChannels struct {
 	ioFilename chan<- string
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
-}
-
-// create a blank 2D slice of size p.ImageHeight x p.ImageWidth
-func initialiseNewWorld(p Params) [][]byte {
-	world := make([][]byte, p.ImageHeight)
-	for i := range world {
-		world[i] = make([]byte, p.ImageWidth)
-	}
-	return world
 }
 
 // parameterizable 2D slice creator (rows x columns)
@@ -71,26 +60,6 @@ func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 		}
 	}
 	return alive
-}
-
-// complete 1 iteration of the world following Game of Life rules
-func evolve(world [][]byte, p Params) [][]byte {
-	newWorld := initialiseNewWorld(p)
-	for i, row := range world {
-		for j := range row {
-			neighbours := getNeighbourCount(world, i, j, p)
-			if neighbours < 2 || neighbours > 3 {
-				newWorld[i][j] = 0x00
-			} else {
-				if world[i][j] == 0x00 && neighbours == 3 {
-					newWorld[i][j] = 0xFF
-					continue
-				}
-				newWorld[i][j] = world[i][j]
-			}
-		}
-	}
-	return newWorld
 }
 
 func getNextCell(slice HorSlice, i, j, neighbourCount int) uint8 {
@@ -240,19 +209,9 @@ func distributor(p Params, c distributorChannels) {
 			}()
 		}
 		waitgroup.Wait()
-
-		// fmt.Print("old:\n")
-		// util.VisualiseSquare(world, p.ImageWidth, p.ImageHeight)
-		// fmt.Print("new:\n")
-		// util.VisualiseSquare(newWorld, p.ImageWidth, p.ImageHeight)
-
-		// time.Sleep(500 * time.Millisecond)
-
 		// updates world
 		world = newWorld
 		c.events <- TurnComplete{turn}
-		//temp
-		// assertChannelEmpty(workerOutputChannel, p, turn)
 
 		// checking if ticker has ticked
 		checkTicker(ticker, world, turn+1, c)
@@ -276,17 +235,4 @@ func distributor(p Params, c distributorChannels) {
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 	ticker.Stop()
-}
-
-//asserts
-func assertChannelEmpty(channel chan HorSlice, p Params, turn int) {
-	if len(channel) != 0 {
-		fmt.Printf("\n\n\nchannel not empty!!!!\n\n\n")
-		fmt.Printf("channel length: %d\n", len(channel))
-		temp := <-channel
-		fmt.Printf("\n\n\nchannel item start row %d end row %d \n\n\n", temp.startRow, temp.endRow)
-		fmt.Printf("turns total: %d\n\n", p.Turns)
-		fmt.Printf("current turn: %d\n\n", turn)
-		os.Exit(1)
-	}
 }
