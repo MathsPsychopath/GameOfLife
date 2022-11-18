@@ -1,44 +1,92 @@
-package main
+package server
 
 import (
 	"flag"
-	"math/rand"
 	"net"
 	"net/rpc"
-	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
-/** Super-Secret `reversing a string' method we can't allow clients to see. **/
-func ReverseString(s string, i int) string {
-    time.Sleep(time.Duration(rand.Intn(i))* time.Second)
-    runes := []rune(s)
-    for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
-        runes[i], runes[j] = runes[j], runes[i]
-    }
-    return string(runes)
+// create a blank 2D slice of size p.ImageHeight x p.ImageWidth
+func initialiseNewWorld(p stubs.Params) [][]byte {
+	world := make([][]byte, p.ImageHeight)
+	for i := range(world){
+		world[i] = make([]byte, p.ImageWidth)
+	}
+	return world
 }
 
-type SecretStringOperations struct {
-
+// count the number of neighbours that a particular cell has in the world
+func getNeighbourCount(world [][]byte, row, column int, p stubs.Params) int {
+	alive := 0
+	offsets := []util.Cell{
+		{X:-1,Y: -1},
+		{X:-1,Y: 0},
+		{X:-1,Y: 1},
+		{X:0, Y:-1},
+		{X:0, Y:1},
+		{X:1, Y:-1},
+		{X:1, Y:0},
+		{X:1, Y:1},
+	}
+	for _,offset := range offsets {
+		actualRow := (row + offset.X) % p.ImageHeight
+		if actualRow < 0 {
+			actualRow = p.ImageHeight - 1
+		}
+		actualCol := (column + offset.Y) % p.ImageWidth
+		if actualCol < 0 {
+			actualCol = p.ImageWidth - 1
+		}
+		if world[actualRow][actualCol] == 0xFF {
+			alive++
+		}
+	}
+	return alive
 }
 
-func (s *SecretStringOperations) Reverse(req stubs.Request, res *stubs.Response) (err error) {
-    res.Message = ReverseString(req.Message, 10)
-    return
+// complete 1 iteration of the world following Game of Life rules
+func evolve(world [][]byte, p stubs.Params) [][]byte {
+	newWorld := initialiseNewWorld(p);
+	for i, row := range world {
+		for j := range row {
+			neighbours := getNeighbourCount(world, i, j, p)
+			if neighbours < 2 || neighbours > 3{
+				newWorld[i][j] = 0x00
+			} else {
+				if world[i][j] == 0x00 && neighbours == 3{
+					newWorld[i][j] = 0xFF
+					continue
+				}
+				newWorld[i][j] = world[i][j]
+			}
+		}
+	}
+	return newWorld
 }
 
-func (s *SecretStringOperations) FastReverse(req stubs.Request, res *stubs.Response) (err error) {
-    res.Message = ReverseString(req.Message, 2)
+func EvolveWorld(world [][]byte, p stubs.Params) [][]byte {
+    turn := 0
+	// TODO: Execute all turns of the Game of Life.
+	for ;turn < p.Turns; turn++  {
+		world = evolve(world, p);
+	}
+    return world
+}
+
+type GameOfLife struct {}
+
+func (g *GameOfLife) Evolve(req stubs.Request, res *stubs.Response) (err error) {
+    res.World = EvolveWorld(req.World, req.P)
     return
 }
 
 func main() {
     pAddr := flag.String("port", "8030", "Port to listen on")
     flag.Parse()
-    rand.Seed(time.Now().UnixNano())
-    rpc.Register(&SecretStringOperations{})
+    rpc.Register(&GameOfLife{})
 
     listener, _ := net.Listen("tcp", ":" + *pAddr)
     defer listener.Close()
