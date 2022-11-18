@@ -167,7 +167,7 @@ func checkTicker(ticker *time.Ticker, world [][]byte, turn int, c distributorCha
 }
 
 // parse keypresses and execute the different actions
-func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan int, worldState <-chan HorSlice, wg *sync.WaitGroup) {
+func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan int, worldState <-chan HorSlice, wg *sync.WaitGroup, quit chan<- bool) {
 	paused := false
 	for {
 		key := <-kp
@@ -183,13 +183,11 @@ func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan
 			if paused {
 				continue
 			}
-			fmt.Println("quitting...")
 			generatePGM(p, c, (<-worldState).grid, <-turn)
 			c.ioCommand <- ioCheckIdle
 			<-c.ioIdle
 			c.events <- StateChange{CompletedTurns: <-turn, NewState: Quitting}
-			wg.Add(5)
-			close(c.events)
+			quit <- true
 			return
 		case 'p':
 			// pause execution. If already paused, continue
@@ -199,7 +197,6 @@ func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan
 				fmt.Println("Continuing")
 				c.events <- StateChange{CompletedTurns: <-turn, NewState: Executing}
 			} else {
-				fmt.Println("pausing")
 				paused = true
 				wg.Add(1)
 				c.events <- StateChange{CompletedTurns: <-turn, NewState: Paused}
@@ -235,18 +232,22 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	// start keypress parser
 	turnSender := make(chan int)
 	kpStateUpdates := make(chan HorSlice)
+	quit := make(chan bool)
 	var golLoop sync.WaitGroup
-	go keypressParser(p, c, kp, turnSender, kpStateUpdates, &golLoop)
+	go keypressParser(p, c, kp, turnSender, kpStateUpdates, &golLoop, quit)
 
 	// TODO: Execute all turns of the Game of Life.
 	turn := 0
 	// creating channels
 	workerOutputChannel := make(chan HorSlice, p.Threads)
 	var waitgroup sync.WaitGroup
+gol:
 	for ; turn < p.Turns; turn++ {
 		select {
 		case turnSender <- turn:
 		case kpStateUpdates <- HorSlice{grid: world, startRow: 0, endRow: 0}:
+		case <-quit:
+			break gol
 		default:
 		}
 		golLoop.Wait()
