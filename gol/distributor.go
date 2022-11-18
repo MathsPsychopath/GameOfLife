@@ -173,15 +173,24 @@ func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan
 		key := <-kp
 		switch key {
 		case 's':
+			if paused {
+				continue
+			}
 			// generate PGM image of current state
 			generatePGM(p, c, (<-worldState).grid, <-turn)
 		case 'q':
 			// generate PGM image and terminate
+			if paused {
+				continue
+			}
+			fmt.Println("quitting...")
 			generatePGM(p, c, (<-worldState).grid, <-turn)
 			c.ioCommand <- ioCheckIdle
 			<-c.ioIdle
 			c.events <- StateChange{CompletedTurns: <-turn, NewState: Quitting}
+			wg.Add(5)
 			close(c.events)
+			return
 		case 'p':
 			// pause execution. If already paused, continue
 			if paused {
@@ -190,6 +199,7 @@ func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan
 				fmt.Println("Continuing")
 				c.events <- StateChange{CompletedTurns: <-turn, NewState: Executing}
 			} else {
+				fmt.Println("pausing")
 				paused = true
 				wg.Add(1)
 				c.events <- StateChange{CompletedTurns: <-turn, NewState: Paused}
@@ -234,6 +244,11 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	workerOutputChannel := make(chan HorSlice, p.Threads)
 	var waitgroup sync.WaitGroup
 	for ; turn < p.Turns; turn++ {
+		select {
+		case turnSender <- turn:
+		case kpStateUpdates <- HorSlice{grid: world, startRow: 0, endRow: 0}:
+		default:
+		}
 		golLoop.Wait()
 		newWorld := createNewSlice(p.ImageHeight, p.ImageWidth)
 
