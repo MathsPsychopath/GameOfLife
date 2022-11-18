@@ -1,4 +1,4 @@
-package server
+package main
 
 import (
 	"flag"
@@ -10,7 +10,7 @@ import (
 )
 
 // create a blank 2D slice of size p.ImageHeight x p.ImageWidth
-func initialiseNewWorld(p stubs.Params) [][]byte {
+func initialiseNewWorld(p stubs.StubParams) [][]byte {
 	world := make([][]byte, p.ImageHeight)
 	for i := range(world){
 		world[i] = make([]byte, p.ImageWidth)
@@ -19,7 +19,7 @@ func initialiseNewWorld(p stubs.Params) [][]byte {
 }
 
 // count the number of neighbours that a particular cell has in the world
-func getNeighbourCount(world [][]byte, row, column int, p stubs.Params) int {
+func getNeighbourCount(world [][]byte, row, column int, p stubs.StubParams) int {
 	alive := 0
 	offsets := []util.Cell{
 		{X:-1,Y: -1},
@@ -48,7 +48,7 @@ func getNeighbourCount(world [][]byte, row, column int, p stubs.Params) int {
 }
 
 // complete 1 iteration of the world following Game of Life rules
-func evolve(world [][]byte, p stubs.Params) [][]byte {
+func evolve(world [][]byte, p stubs.StubParams) [][]byte {
 	newWorld := initialiseNewWorld(p);
 	for i, row := range world {
 		for j := range row {
@@ -67,7 +67,8 @@ func evolve(world [][]byte, p stubs.Params) [][]byte {
 	return newWorld
 }
 
-func EvolveWorld(world [][]byte, p stubs.Params) [][]byte {
+// This implements the interface method
+func EvolveWorld(world [][]byte, p stubs.StubParams) [][]byte {
     turn := 0
 	// TODO: Execute all turns of the Game of Life.
 	for ;turn < p.Turns; turn++  {
@@ -78,6 +79,7 @@ func EvolveWorld(world [][]byte, p stubs.Params) [][]byte {
 
 type GameOfLife struct {}
 
+// expose an interface method
 func (g *GameOfLife) Evolve(req stubs.Request, res *stubs.Response) (err error) {
     res.World = EvolveWorld(req.World, req.P)
     return

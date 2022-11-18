@@ -1,17 +1,12 @@
 package gol
 
 import (
+	"net/rpc"
 	"strconv"
 
+	"uk.ac.bris.cs/gameoflife/stubs"
 	util "uk.ac.bris.cs/gameoflife/util"
 )
-
-// type to reduce # of individual channels
-type HorSlice struct {
-	grid     [][]byte
-	startRow int
-	endRow   int
-}
 
 type distributorChannels struct {
 	events     chan<- Event
@@ -59,7 +54,7 @@ func getAliveCellsCount(world [][]byte) int {
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels, kp <-chan rune) {
+func distributor(p Params, c distributorChannels) {
 
 	// TODO: Give the filename to the io.channels.filename channel
 	c.ioCommand <- ioInput
@@ -79,8 +74,19 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 		}
 	}
 	// TODO: open RPC call to the AWS node. may need to hardcode IP address
+	client, _ := rpc.Dial("tcp", "127.0.0.1:8030")
+	defer client.Close()
 
+	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight }
+	request := stubs.Request{World: world, P: stubParams}
+	response := new(stubs.Response)
 
+	err := client.Call(stubs.Evolve, request, response)
+	if err != nil {
+		panic("an error happened during rpc call")
+	}
+
+	world = response.World
 	// Get a slice of the alive cells
 	aliveCells := getAliveCells(world)
 

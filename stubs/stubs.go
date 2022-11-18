@@ -1,14 +1,14 @@
 package stubs
 
 // Params provides the details of how to run the Game of Life and which image to load.
-type Params struct {
+type StubParams struct {
 	Turns       int
 	Threads     int
 	ImageWidth  int
 	ImageHeight int
 }
 
-var ReverseHandler = "GameOfLife.Evolve"
+var Evolve = "GameOfLife.Evolve"
 
 type Response struct {
 	World [][]byte
@@ -16,5 +16,5 @@ type Response struct {
 
 type Request struct {
 	World [][]byte
-	P Params
+	P StubParams
 }
