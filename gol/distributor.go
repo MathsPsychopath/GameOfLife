@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -8,6 +9,7 @@ import (
 	util "uk.ac.bris.cs/gameoflife/util"
 )
 
+// type to reduce # of individual channels
 type HorSlice struct {
 	grid     [][]byte
 	startRow int
@@ -62,6 +64,7 @@ func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 	return alive
 }
 
+// apply GOL rules and return the result for given cell
 func getNextCell(slice HorSlice, i, j, neighbourCount int) uint8 {
 	if neighbourCount < 2 || neighbourCount > 3 {
 		return 0x00
@@ -125,6 +128,7 @@ func getAliveCellsCount(world [][]byte) int {
 	return count
 }
 
+// generate PGM file using ioCommand
 func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
 	c.ioCommand <- ioOutput
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turns))
@@ -136,6 +140,7 @@ func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
 	}
 }
 
+// start worker threads to work on specific sections given params
 func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i int, c distributorChannels, turn int) {
 	// i is current thread
 	segmentSize := p.ImageHeight / p.Threads
@@ -150,6 +155,7 @@ func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i i
 	go worker(slice, p, outputChannel, c, turn)
 }
 
+// send the AliveCellsCount event
 func checkTicker(ticker *time.Ticker, world [][]byte, turn int, c distributorChannels) {
 	select {
 	case <-ticker.C:
@@ -160,8 +166,50 @@ func checkTicker(ticker *time.Ticker, world [][]byte, turn int, c distributorCha
 
 }
 
+// parse keypresses and execute the different actions
+func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan int, worldState <-chan HorSlice, wg *sync.WaitGroup) {
+	paused := false
+	for {
+		key := <-kp
+		switch key {
+		case 's':
+			if paused {
+				continue
+			}
+			// generate PGM image of current state
+			generatePGM(p, c, (<-worldState).grid, <-turn)
+		case 'q':
+			// generate PGM image and terminate
+			if paused {
+				continue
+			}
+			fmt.Println("quitting...")
+			generatePGM(p, c, (<-worldState).grid, <-turn)
+			c.ioCommand <- ioCheckIdle
+			<-c.ioIdle
+			c.events <- StateChange{CompletedTurns: <-turn, NewState: Quitting}
+			wg.Add(5)
+			close(c.events)
+			return
+		case 'p':
+			// pause execution. If already paused, continue
+			if paused {
+				paused = false
+				wg.Done()
+				fmt.Println("Continuing")
+				c.events <- StateChange{CompletedTurns: <-turn, NewState: Executing}
+			} else {
+				fmt.Println("pausing")
+				paused = true
+				wg.Add(1)
+				c.events <- StateChange{CompletedTurns: <-turn, NewState: Paused}
+			}
+		}
+	}
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels, kp <-chan rune) {
 
 	// TODO: Give the filename to the io.channels.filename channel
 	c.ioCommand <- ioInput
@@ -176,7 +224,7 @@ func distributor(p Params, c distributorChannels) {
 		for j := 0; j < p.ImageWidth; j++ {
 			world[i][j] = <-c.ioInput
 			if world[i][j] == 0xFF {
-				c.events <- CellFlipped{0, util.Cell{j, i}}
+				c.events <- CellFlipped{0, util.Cell{X: j, Y: i}}
 			}
 		}
 	}
@@ -184,12 +232,24 @@ func distributor(p Params, c distributorChannels) {
 	// start ticker to indicate alive cells
 	ticker := time.NewTicker(2 * time.Second)
 
+	// start keypress parser
+	turnSender := make(chan int)
+	kpStateUpdates := make(chan HorSlice)
+	var golLoop sync.WaitGroup
+	go keypressParser(p, c, kp, turnSender, kpStateUpdates, &golLoop)
+
 	// TODO: Execute all turns of the Game of Life.
 	turn := 0
 	// creating channels
 	workerOutputChannel := make(chan HorSlice, p.Threads)
 	var waitgroup sync.WaitGroup
 	for ; turn < p.Turns; turn++ {
+		select {
+		case turnSender <- turn:
+		case kpStateUpdates <- HorSlice{grid: world, startRow: 0, endRow: 0}:
+		default:
+		}
+		golLoop.Wait()
 		newWorld := createNewSlice(p.ImageHeight, p.ImageWidth)
 
 		// Initialise the worker threads
