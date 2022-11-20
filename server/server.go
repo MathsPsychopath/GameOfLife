@@ -18,7 +18,13 @@ type AliveContainer struct {
 	count   int
 }
 
-var current = AliveContainer{turn: 0, count: 0}
+type WorldContainer struct {
+	mu 		sync.Mutex
+	world   [][]byte
+}
+
+var acknowledgedAlive = AliveContainer{turn: 0, count: 0}
+var acknowledgedWorld = WorldContainer{world: nil}
 
 // update the turn and alive
 func (a *AliveContainer) update(newTurn, newAlive int) {
@@ -26,7 +32,13 @@ func (a *AliveContainer) update(newTurn, newAlive int) {
 	a.turn = newTurn
 	a.count = newAlive
 	a.mu.Unlock()
-	return
+}
+
+// may need an implementation that changes based on cell flipped events
+func (w *WorldContainer) update(world [][]byte) {
+	w.mu.Lock()
+	w.world = world
+	w.mu.Unlock()
 }
 
 // create a blank 2D slice of size p.ImageHeight x p.ImageWidth
@@ -108,7 +120,7 @@ func EvolveWorld(world [][]byte, p stubs.StubParams) [][]byte {
 		world = evolve(world, p);
 		count := getAliveCellsCount(world)
 		go func() {
-			current.update(turn, count)
+			acknowledgedAlive.update(turn, count)
 		}()
 	}
     return world
@@ -117,19 +129,32 @@ func EvolveWorld(world [][]byte, p stubs.StubParams) [][]byte {
 type GameOfLife struct {}
 
 // expose an interface method
-func (g *GameOfLife) Evolve(req stubs.Request, res *stubs.Response) (err error) {
+func (g *GameOfLife) Evolve(req stubs.EvolveRequest, res *stubs.Response) (err error) {
     res.World = EvolveWorld(req.World, req.P)
     return
 }
 
-func (g *GameOfLife) GetAliveCells(req stubs.AliveCellsRequest, res *stubs.AliveCellsResponse) (err error) {
+func (g *GameOfLife) GetAliveCells(req stubs.GetRequest, res *stubs.Response) (err error) {
 	fmt.Println("received GAC call")
-	current.mu.Lock()
-	res.Count = current.count
-	res.Turn = current.turn
-	current.mu.Unlock()
+	acknowledgedAlive.mu.Lock()
+	res.Count = acknowledgedAlive.count
+	res.Turn = acknowledgedAlive.turn
+	acknowledgedAlive.mu.Unlock()
 	return
 }
+
+type InputOutput struct {}
+
+func (i *InputOutput) SaveState(req stubs.GetRequest, res *stubs.Response) (err error) {
+	acknowledgedWorld.mu.Lock()
+	res.World = acknowledgedWorld.world
+	acknowledgedWorld.mu.Unlock()
+	return
+}
+
+// func (i *InputOutput) ControllerStop(req stubs.GetRequest, res *stubs.ResponseStatus) (err error) {
+// 	// 
+// }
 
 func main() {
     pAddr := flag.String("port", "8030", "Port to listen on")
