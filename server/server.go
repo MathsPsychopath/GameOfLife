@@ -2,12 +2,32 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
 	"net/rpc"
+	"sync"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
+
+// Mutex locked data to avoid race conditions
+type AliveContainer struct {
+	mu 		sync.Mutex
+	turn    int
+	count   int
+}
+
+var current = AliveContainer{turn: 0, count: 0}
+
+// update the turn and alive
+func (a *AliveContainer) update(newTurn, newAlive int) {
+	a.mu.Lock()
+	a.turn = newTurn
+	a.count = newAlive
+	a.mu.Unlock()
+	return
+}
 
 // create a blank 2D slice of size p.ImageHeight x p.ImageWidth
 func initialiseNewWorld(p stubs.StubParams) [][]byte {
@@ -47,6 +67,19 @@ func getNeighbourCount(world [][]byte, row, column int, p stubs.StubParams) int 
 	return alive
 }
 
+// get the number of alive cells
+func getAliveCellsCount(world [][]byte) int {
+	count := 0
+	for _, row := range world {
+		for _, cell := range row {
+			if cell == 0xFF {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 // complete 1 iteration of the world following Game of Life rules
 func evolve(world [][]byte, p stubs.StubParams) [][]byte {
 	newWorld := initialiseNewWorld(p);
@@ -71,8 +104,12 @@ func evolve(world [][]byte, p stubs.StubParams) [][]byte {
 func EvolveWorld(world [][]byte, p stubs.StubParams) [][]byte {
     turn := 0
 	// TODO: Execute all turns of the Game of Life.
-	for ;turn < p.Turns; turn++  {
+	for ;turn < p.Turns; turn++ {
 		world = evolve(world, p);
+		count := getAliveCellsCount(world)
+		go func() {
+			current.update(turn, count)
+		}()
 	}
     return world
 }
@@ -83,6 +120,15 @@ type GameOfLife struct {}
 func (g *GameOfLife) Evolve(req stubs.Request, res *stubs.Response) (err error) {
     res.World = EvolveWorld(req.World, req.P)
     return
+}
+
+func (g *GameOfLife) GetAliveCells(req stubs.AliveCellsRequest, res *stubs.AliveCellsResponse) (err error) {
+	fmt.Println("received GAC call")
+	current.mu.Lock()
+	res.Count = current.count
+	res.Turn = current.turn
+	current.mu.Unlock()
+	return
 }
 
 func main() {

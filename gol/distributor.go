@@ -3,6 +3,7 @@ package gol
 import (
 	"net/rpc"
 	"strconv"
+	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
 	util "uk.ac.bris.cs/gameoflife/util"
@@ -53,6 +54,23 @@ func getAliveCellsCount(world [][]byte) int {
 	return count
 }
 
+// execute RPC calls to poll the number of alive cells every 2 seconds
+func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan struct {}) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	request := stubs.AliveCellsRequest{}
+	response := new(stubs.AliveCellsResponse)
+	for {
+		select {
+		case <- exit:
+			return
+		case <- ticker.C:
+			client.Call(stubs.GetAliveCells, request, response)
+			c.events <- AliveCellsCount{CellsCount: response.Count, CompletedTurns: response.Turn}			
+		}
+	}
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
@@ -73,7 +91,7 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 	}
-	// TODO: open RPC call to the AWS node. may need to hardcode IP address
+	// open RPC call to the AWS node. may need to hardcode IP address
 	client, _ := rpc.Dial("tcp", "127.0.0.1:8030")
 	defer client.Close()
 
@@ -81,6 +99,12 @@ func distributor(p Params, c distributorChannels) {
 	request := stubs.Request{World: world, P: stubParams}
 	response := new(stubs.Response)
 
+	// initialise ticker
+	exit := make(chan struct {})
+	defer close(exit)
+	go aliveCellsTicker(client, c, exit)
+
+	// execute rpc
 	err := client.Call(stubs.Evolve, request, response)
 	if err != nil {
 		panic("an error happened during rpc call")

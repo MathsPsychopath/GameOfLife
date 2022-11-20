@@ -9,6 +9,7 @@ type StubParams struct {
 }
 
 var Evolve = "GameOfLife.Evolve"
+var GetAliveCells = "GameOfLife.GetAliveCells"
 
 type Response struct {
 	World [][]byte
@@ -17,4 +18,11 @@ type Response struct {
 type Request struct {
 	World [][]byte
 	P StubParams
+}
+
+type AliveCellsRequest struct {}
+
+type AliveCellsResponse struct {
+	Count int
+	Turn int
 }
