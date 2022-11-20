@@ -149,6 +149,9 @@ func (i *InputOutput) SaveState(req stubs.GetRequest, res *stubs.Response) (err 
 	acknowledgedWorld.mu.Lock()
 	res.World = acknowledgedWorld.world
 	acknowledgedWorld.mu.Unlock()
+	acknowledgedAlive.mu.Lock()
+	res.Turn = acknowledgedAlive.turn
+	acknowledgedAlive.mu.Unlock()
 	return
 }
 
