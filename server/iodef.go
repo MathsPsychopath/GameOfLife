@@ -1,4 +1,4 @@
-package server
+package main
 
 import "uk.ac.bris.cs/gameoflife/stubs"
 
@@ -14,7 +14,7 @@ type ioChannels struct {
 
 // ioState is the internal ioState of the io goroutine.
 type ioState struct {
-	params   stubs.Params
+	params   stubs.StubParams
 	channels ioChannels
 }
 
