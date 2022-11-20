@@ -71,6 +71,18 @@ func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan str
 	}
 }
 
+// sends the correct events + data in channels for pgm output
+func outputPgm(c distributorChannels, p Params, world [][]byte, turn int) {
+	c.ioCommand <- ioOutput
+	c.ioFilename <- strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turn)
+
+	for _, row := range world {
+		for _, cell := range row {
+			c.ioOutput <- cell
+		}
+	}
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
@@ -113,6 +125,8 @@ func distributor(p Params, c distributorChannels) {
 	world = response.World
 	// Get a slice of the alive cells
 	aliveCells := getAliveCells(world)
+
+	outputPgm(c, p, world, p.Turns)
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{CompletedTurns: p.Turns, Alive: aliveCells}
