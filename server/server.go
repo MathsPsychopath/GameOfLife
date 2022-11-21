@@ -5,43 +5,14 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
-	"sync"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-var stop = false
-
-// Mutex locked data to avoid race conditions
-type AliveContainer struct {
-	mu 		sync.Mutex
-	turn    int
-	count   int
-}
-
-type WorldContainer struct {
-	mu 		sync.Mutex
-	world   [][]byte
-}
-
+var exit = make(chan struct {})
 var acknowledgedAlive = AliveContainer{turn: 0, count: 0}
 var acknowledgedWorld = WorldContainer{world: nil}
-
-// update the turn and alive
-func (a *AliveContainer) update(newTurn, newAlive int) {
-	a.mu.Lock()
-	a.turn = newTurn
-	a.count = newAlive
-	a.mu.Unlock()
-}
-
-// may need an implementation that changes based on cell flipped events
-func (w *WorldContainer) update(world [][]byte) {
-	w.mu.Lock()
-	w.world = world
-	w.mu.Unlock()
-}
 
 // create a blank 2D slice of size p.ImageHeight x p.ImageWidth
 func initialiseNewWorld(p stubs.StubParams) [][]byte {
@@ -119,6 +90,12 @@ func EvolveWorld(world [][]byte, p stubs.StubParams) [][]byte {
     turn := 0
 	// TODO: Execute all turns of the Game of Life.
 	for ;turn < p.Turns; turn++ {
+		//non-blocking exit
+		select {
+		case <-exit:
+			//return the latest acknowledged world
+		default:
+		}
 		world = evolve(world, p);
 		count := getAliveCellsCount(world)
 		acknowledgedAlive.update(turn, count)
@@ -158,8 +135,9 @@ func (i *InputOutput) SaveState(req stubs.GetRequest, res *stubs.Response) (err 
 }
 
 func (i *InputOutput) KillWorkers(req stubs.GetRequest, res *stubs.ResponseStatus) (Err error) {
-	stop = true
 	res.Status = stubs.Ok
+	close(exit)
+	fmt.Println("received kill call")
 	return
 }
 
@@ -179,5 +157,5 @@ func main() {
 	}
     defer listener.Close()
     go rpc.Accept(listener)
-	
+	<-exit
 }
