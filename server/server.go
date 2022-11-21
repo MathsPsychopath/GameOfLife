@@ -11,6 +11,8 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
+var stop = false
+
 // Mutex locked data to avoid race conditions
 type AliveContainer struct {
 	mu 		sync.Mutex
@@ -155,12 +157,18 @@ func (i *InputOutput) SaveState(req stubs.GetRequest, res *stubs.Response) (err 
 	return
 }
 
+func (i *InputOutput) KillWorkers(req stubs.GetRequest, res *stubs.ResponseStatus) (Err error) {
+	stop = true
+	res.Status = stubs.Ok
+	return
+}
+
 // func (i *InputOutput) ControllerStop(req stubs.GetRequest, res *stubs.ResponseStatus) (err error) {
 // 	// 
 // }
 
 func main() {
-    pAddr := flag.String("port", "8030", "Port to listen on")
+    pAddr := flag.String("port", "9000", "Port to listen on")
     flag.Parse()
     rpc.Register(&GameOfLife{})
 	rpc.Register(&InputOutput{})
@@ -170,6 +178,6 @@ func main() {
 		fmt.Println(err)
 	}
     defer listener.Close()
-    rpc.Accept(listener)
-
+    go rpc.Accept(listener)
+	
 }

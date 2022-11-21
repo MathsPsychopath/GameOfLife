@@ -42,19 +42,6 @@ func getAliveCells(world [][]byte) []util.Cell {
 	return aliveCells
 }
 
-// get the number of alive cells
-func getAliveCellsCount(world [][]byte) int {
-	count := 0
-	for _, row := range world {
-		for _, cell := range row {
-			if cell == 0xFF {
-				count++
-			}
-		}
-	}
-	return count
-}
-
 // execute RPC calls to poll the number of alive cells every 2 seconds
 func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan struct {}) {
 	ticker := time.NewTicker(2 * time.Second)
@@ -101,8 +88,11 @@ func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distr
 			//close the local controller
 		case 'k':
 			//kill the distributed system
+			// res := new(stubs.ResponseStatus)
+			// client.Call(stubs.)
 		case 'p':
 			//pause/unpause the processing
+			
 		}
 	}
 }
