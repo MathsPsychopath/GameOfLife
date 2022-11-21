@@ -119,7 +119,8 @@ func EvolveWorld(world [][]byte, p stubs.StubParams) [][]byte {
 	for ;turn < p.Turns; turn++ {
 		world = evolve(world, p);
 		count := getAliveCellsCount(world)
-		go acknowledgedAlive.update(turn, count)
+		acknowledgedAlive.update(turn, count)
+		acknowledgedWorld.update(world)
 	}
     return world
 }
@@ -144,10 +145,11 @@ func (g *GameOfLife) GetAliveCells(req stubs.GetRequest, res *stubs.Response) (e
 type InputOutput struct {}
 
 func (i *InputOutput) SaveState(req stubs.GetRequest, res *stubs.Response) (err error) {
+	fmt.Println("received SS call")
 	acknowledgedWorld.mu.Lock()
+	acknowledgedAlive.mu.Lock()
 	res.World = acknowledgedWorld.world
 	acknowledgedWorld.mu.Unlock()
-	acknowledgedAlive.mu.Lock()
 	res.Turn = acknowledgedAlive.turn
 	acknowledgedAlive.mu.Unlock()
 	return
@@ -161,8 +163,12 @@ func main() {
     pAddr := flag.String("port", "8030", "Port to listen on")
     flag.Parse()
     rpc.Register(&GameOfLife{})
+	rpc.Register(&InputOutput{})
 
-    listener, _ := net.Listen("tcp", ":" + *pAddr)
+    listener, err := net.Listen("tcp", ":" + *pAddr)
+	if err != nil {
+		fmt.Println(err)
+	}
     defer listener.Close()
     rpc.Accept(listener)
 
