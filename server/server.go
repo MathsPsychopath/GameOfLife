@@ -119,9 +119,7 @@ func EvolveWorld(world [][]byte, p stubs.StubParams) [][]byte {
 	for ;turn < p.Turns; turn++ {
 		world = evolve(world, p);
 		count := getAliveCellsCount(world)
-		go func() {
-			acknowledgedAlive.update(turn, count)
-		}()
+		go acknowledgedAlive.update(turn, count)
 	}
     return world
 }
