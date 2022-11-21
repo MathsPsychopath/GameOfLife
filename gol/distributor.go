@@ -58,8 +58,8 @@ func getAliveCellsCount(world [][]byte) int {
 func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan struct {}) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	request := stubs.AliveCellsRequest{}
-	response := new(stubs.AliveCellsResponse)
+	request := stubs.GetRequest{}
+	response := new(stubs.Response)
 	for {
 		select {
 		case <- exit:
@@ -83,8 +83,27 @@ func outputPgm(c distributorChannels, p Params, world [][]byte, turn int) {
 	}
 }
 
+func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distributorChannels, p Params) {
+	for {
+		key := <-kp
+		switch key {
+		case 's':
+			//output a pgm image
+			res := new(stubs.Response)
+			client.Call(stubs.Save, stubs.GetRequest{}, res)
+			outputPgm(c, p, res.World, res.Turn)
+		case 'q':
+			//close the local controller
+		case 'k':
+			//kill the distributed system
+		case 'p':
+			//pause/unpause the processing
+		}
+	}
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels,kp <-chan rune) {
 
 	// TODO: Give the filename to the io.channels.filename channel
 	c.ioCommand <- ioInput
@@ -108,13 +127,16 @@ func distributor(p Params, c distributorChannels) {
 	defer client.Close()
 
 	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight }
-	request := stubs.Request{World: world, P: stubParams}
+	request := stubs.EvolveRequest{World: world, P: stubParams}
 	response := new(stubs.Response)
 
 	// initialise ticker
 	exit := make(chan struct {})
 	defer close(exit)
 	go aliveCellsTicker(client, c, exit)
+
+	// start keypress listener
+	go kpListener(kp, client, exit, c, p)
 
 	// execute rpc
 	err := client.Call(stubs.Evolve, request, response)
