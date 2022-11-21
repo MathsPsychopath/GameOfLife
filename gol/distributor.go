@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"net/rpc"
 	"strconv"
 	"time"
@@ -74,13 +75,14 @@ func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan str
 // sends the correct events + data in channels for pgm output
 func outputPgm(c distributorChannels, p Params, world [][]byte, turn int) {
 	c.ioCommand <- ioOutput
-	c.ioFilename <- strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turn)
+	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turn))
 
 	for _, row := range world {
 		for _, cell := range row {
 			c.ioOutput <- cell
 		}
 	}
+	fmt.Println("Output complete!")
 }
 
 func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distributorChannels, p Params) {
@@ -91,7 +93,10 @@ func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distr
 			//output a pgm image
 			res := new(stubs.Response)
 			client.Call(stubs.Save, stubs.GetRequest{}, res)
+			fmt.Println("sent Save call")
 			outputPgm(c, p, res.World, res.Turn)
+			c.ioCommand <- ioCheckIdle
+			<- c.ioIdle
 		case 'q':
 			//close the local controller
 		case 'k':
@@ -123,7 +128,7 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 		}
 	}
 	// open RPC call to the AWS node. may need to hardcode IP address
-	client, _ := rpc.Dial("tcp", "127.0.0.1:8030")
+	client, _ := rpc.Dial("tcp", "127.0.0.1:9000")
 	defer client.Close()
 
 	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight }
