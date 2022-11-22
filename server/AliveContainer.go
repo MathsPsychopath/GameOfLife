@@ -4,7 +4,7 @@ import "sync"
 
 // Mutex locked data to avoid race conditions
 type AliveContainer struct {
-	mu 		sync.Mutex
+	mu 		*sync.Mutex
 	turn    int
 	count   int
 }

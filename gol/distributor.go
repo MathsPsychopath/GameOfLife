@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"net"
 	"net/rpc"
 	"strconv"
 	"time"
@@ -19,6 +20,12 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
+var acknowledgedCells = stubs.CellsContainer{Cells: nil, Turn: 0}
+var exit = make(chan struct {})
+var brokerAddr = "127.0.0.1:9000"
+var listenAddr = ":9010"
+var eventsSender Sender
+
 // parameterizable 2D slice creator (rows x columns)
 func createNewSlice(rows, columns int) [][]byte {
 	world := make([][]byte, rows)
@@ -28,48 +35,45 @@ func createNewSlice(rows, columns int) [][]byte {
 	return world
 }
 
-// get a list of the alive cells existing in the world
-func getAliveCells(world [][]byte) []util.Cell {
-	var aliveCells []util.Cell
-
-	for i, row := range world {
-		for j, cell := range row {
-			if cell == 0xFF {
-				aliveCells = append(aliveCells, util.Cell{X: j, Y: i})
-			}
-		}
+// convert []util.Cell to a 2D slice
+func populateWorld(cells []util.Cell, p Params) [][]byte {
+	world := createNewSlice(p.ImageHeight, p.ImageWidth)
+	for _, aliveCell := range cells {
+		world[aliveCell.Y][aliveCell.X] = 0xFF
 	}
-	return aliveCells
+	return world
 }
 
 // execute RPC calls to poll the number of alive cells every 2 seconds
 func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan struct {}) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	request := stubs.GetRequest{}
-	response := new(stubs.Response)
+	res := new(stubs.PushStateBody)
 	for {
 		select {
 		case <- exit:
 			return
 		case <- ticker.C:
-			client.Call(stubs.GetAliveCells, request, response)
-			c.events <- AliveCellsCount{CellsCount: response.Count, CompletedTurns: response.Turn}			
+			client.Call(stubs.GetAlive, stubs.NilRequest{}, res)
+			eventsSender.SendAliveCellsList(res.Turn, res.Cells)
 		}
 	}
 }
 
 // sends the correct events + data in channels for pgm output
-func outputPgm(c distributorChannels, p Params, world [][]byte, turn int) {
+func outputPgm(c distributorChannels, p Params, cells []util.Cell, turn int) {
 	c.ioCommand <- ioOutput
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turn))
+
+	world := populateWorld(cells, p)	
 
 	for _, row := range world {
 		for _, cell := range row {
 			c.ioOutput <- cell
 		}
 	}
-	fmt.Println("Output complete!")
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
 }
 
 func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distributorChannels, p Params) {
@@ -78,75 +82,117 @@ func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distr
 		switch key {
 		case 's':
 			//output a pgm image
-			res := new(stubs.Response)
-			client.Call(stubs.Save, stubs.GetRequest{}, res)
+			res := new(stubs.PushStateBody)
+			client.Call(stubs.SaveState, stubs.NilRequest{}, res)
 			fmt.Println("sent Save call")
-			outputPgm(c, p, res.World, res.Turn)
-			c.ioCommand <- ioCheckIdle
-			<- c.ioIdle
+			outputPgm(c, p, res.Cells, res.Turn)
 		case 'q':
 			//close the local controller
+			res := new(stubs.StatusResponse)
+			err := client.Call(stubs.ConQuit, stubs.NilRequest{}, res)
+			if err != nil {
+				fmt.Println(err)
+			}
+
+			eventsSender.SendStateChange(res.Turn, Quitting)
+			close(exit)
 		case 'k':
 			//kill the distributed system
-			// res := new(stubs.ResponseStatus)
-			// client.Call(stubs.)
+			res := new(stubs.PushStateBody)
+			fmt.Println("sent kill call")
+			err := client.Call(stubs.SerQuit, stubs.NilRequest{}, res)
+			if err != nil {
+				fmt.Println(err)
+			}
+			outputPgm(c, p, res.Cells, res.Turn)
+			
+			eventsSender.SendStateChange(res.Turn, Quitting)
+			close(exit)
 		case 'p':
 			//pause/unpause the processing
-			
+			res := new(stubs.StatusResponse)
+			err := client.Call(stubs.PauseState, stubs.NilRequest{}, res)
+			if err != nil {
+				fmt.Println(err)
+			}
+			if res.Status == stubs.Paused {
+				eventsSender.SendStateChange(res.Turn, Paused)
+			} else {
+				eventsSender.SendStateChange(res.Turn, Executing)
+			}
 		}
 	}
 }
 
-// distributor divides the work between workers and interacts with other goroutines.
+// distributor distributes the work to the broker via rpc calls
 func distributor(p Params, c distributorChannels,kp <-chan rune) {
+	// provide global info for rpc call handlers to use
+	eventsSender = Sender{Events: c.events, P: p}
 
 	// TODO: Give the filename to the io.channels.filename channel
 	c.ioCommand <- ioInput
 	// e.g., 64x64, 128x128 etc.
 	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight))
 
-	// TODO: initialise the world
-	world := createNewSlice(p.ImageHeight, p.ImageWidth)
-
+	cellsList := make([]util.Cell, 10000)
 	// TODO: Populate blank world with world data from input
 	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
-			world[i][j] = <-c.ioInput
-			if world[i][j] == 0xFF {
-				c.events <- CellFlipped{0, util.Cell{X: j, Y: i}}
+			if <-c.ioInput == 0xFF {
+				Cell := util.Cell{X:j, Y:i}
+				cellsList = append(cellsList, Cell)
 			}
 		}
 	}
-	// open RPC call to the AWS node. may need to hardcode IP address
-	client, _ := rpc.Dial("tcp", "127.0.0.1:9000")
+	eventsSender.SendFlippedCellList(0, cellsList...)
+	acknowledgedCells.Update(cellsList, 0)
+	// dial the Broker. This is a hardcoded address
+	client, _ := rpc.Dial("tcp", brokerAddr)
 	defer client.Close()
 
+	cells, _ := acknowledgedCells.Get()
 	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight }
-	request := stubs.EvolveRequest{World: world, P: stubParams}
-	response := new(stubs.Response)
+	request := stubs.StartGOLRequest{Cells: cells, P: stubParams}
+	response := new(stubs.StatusResponse)
 
 	// initialise ticker
 	exit := make(chan struct {})
 	defer close(exit)
 	go aliveCellsTicker(client, c, exit)
 
+	// start broker receiver
+	go receiver(exit)
+
 	// start keypress listener
 	go kpListener(kp, client, exit, c, p)
 
 	// execute rpc
-	err := client.Call(stubs.Evolve, request, response)
-	if err != nil {
-		panic("an error happened during rpc call")
+	done := make(chan struct{})
+	go func () {
+		err := client.Call(stubs.StartGOL, request, response)
+		if err != nil {
+			fmt.Println(err)
+		}
+		close(done)
+	}()
+		
+	// either the call finishes executing GOL, or exit closes first
+	// if exit closes first, then terminate main
+	// if call finishes executing, then do the image outputting
+	select {
+	case <-exit:
+		close(c.events)
+		return
+	case <-done:
 	}
 
-	world = response.World
 	// Get a slice of the alive cells
-	aliveCells := getAliveCells(world)
+	aliveCells, _ := acknowledgedCells.Get()
 
-	outputPgm(c, p, world, p.Turns)
+	outputPgm(c, p, aliveCells, p.Turns)
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-	c.events <- FinalTurnComplete{CompletedTurns: p.Turns, Alive: aliveCells}
+	eventsSender.SendFinalTurn(p.Turns, aliveCells)
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -154,4 +200,21 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+
+type Controller struct {}
+
+func (c *Controller) PushState(req stubs.PushStateBody, res stubs.StatusResponse) (err error) {
+	acknowledgedCells.Update(req.Cells, req.Turn)
+	eventsSender.SendFlippedCellList(req.Turn, req.Cells...)
+	res.Status = stubs.Running
+	return
+}
+
+func receiver(exit chan struct{}) {
+	rpc.Register(&Controller{})
+	listener, _ := net.Listen("tcp", ":" + listenAddr)
+	defer listener.Close()
+	go rpc.Accept(listener)
+	<-exit
 }

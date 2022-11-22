@@ -3,7 +3,7 @@ package main
 import "sync"
 
 type WorldContainer struct {
-	mu 		sync.Mutex
+	mu 		*sync.Mutex
 	world   [][]byte
 }
 
@@ -12,4 +12,10 @@ func (w *WorldContainer) update(world [][]byte) {
 	w.mu.Lock()
 	w.world = world
 	w.mu.Unlock()
+}
+
+func (w *WorldContainer) get() [][]byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.world
 }

@@ -13,6 +13,7 @@ import (
 var exit = make(chan struct {})
 var acknowledgedAlive = AliveContainer{turn: 0, count: 0}
 var acknowledgedWorld = WorldContainer{world: nil}
+var previousWorld = WorldContainer{world: nil}
 
 // create a blank 2D slice of size p.ImageHeight x p.ImageWidth
 func initialiseNewWorld(p stubs.StubParams) [][]byte {
@@ -52,12 +53,12 @@ func getNeighbourCount(world [][]byte, row, column int, p stubs.StubParams) int 
 	return alive
 }
 
-// get the number of alive cells
-func getAliveCellsCount(world [][]byte) int {
+// get the number of cells with value
+func getAliveCellsCount(world [][]byte, value byte) int {
 	count := 0
 	for _, row := range world {
 		for _, cell := range row {
-			if cell == 0xFF {
+			if cell == value {
 				count++
 			}
 		}
@@ -90,14 +91,15 @@ func EvolveWorld(world [][]byte, p stubs.StubParams) [][]byte {
     turn := 0
 	// TODO: Execute all turns of the Game of Life.
 	for ;turn < p.Turns; turn++ {
+		previousWorld.update(world)
 		//non-blocking exit
 		select {
 		case <-exit:
 			//return the latest acknowledged world
 		default:
 		}
-		world = evolve(world, p);
-		count := getAliveCellsCount(world)
+		world = evolve(previousWorld.get(), p);
+		count := getAliveCellsCount(world, 0xFF)
 		acknowledgedAlive.update(turn, count)
 		acknowledgedWorld.update(world)
 	}
