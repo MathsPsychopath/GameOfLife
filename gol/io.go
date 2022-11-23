@@ -1,11 +1,11 @@
 package gol
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
+
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -83,7 +83,7 @@ func (io *ioState) writePgmImage() {
 	ioError = file.Sync()
 	util.Check(ioError)
 
-	fmt.Println("File", filename, "output done!")
+	// fmt.Println("File", filename, "output done!")
 }
 
 // readPgmImage opens a pgm file and sends its data as an array of bytes.
@@ -122,7 +122,7 @@ func (io *ioState) readPgmImage() {
 		io.channels.input <- b
 	}
 
-	fmt.Println("File", filename, "input done!")
+	// fmt.Println("File", filename, "input done!")
 }
 
 // startIo should be the entrypoint of the io goroutine.
