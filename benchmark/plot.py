@@ -37,7 +37,11 @@ def plot(imageSize, threadTimeDict):
     threads = threadTimeDict.keys()
     time = threadTimeDict.values()
     plt.bar(threads, time)
+    title = "{imageSize}x{imageSize}".format(imageSize=imageSize)
+    plt.title(title)
     fname = "{imageSize}x{imageSize}.jpg".format(imageSize=imageSize)
+    plt.xlabel("number of threads")
+    plt.ylabel("time in seconds")
     plt.savefig(fname, format="jpg")
     
 def main():
