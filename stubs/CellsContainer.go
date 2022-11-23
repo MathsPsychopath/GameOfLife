@@ -12,6 +12,14 @@ type CellsContainer struct {
 	Turn    int
 }
 
+func New(c []util.Cell, t int) *CellsContainer {
+	container := &CellsContainer{}
+	container.Mu = new(sync.Mutex)
+	container.Cells = c
+	container.Turn = t
+	return container
+}
+
 func (c *CellsContainer) Get() ([]util.Cell, int) {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()

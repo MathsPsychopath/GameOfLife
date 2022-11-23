@@ -20,7 +20,7 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-var acknowledgedCells = stubs.CellsContainer{Cells: nil, Turn: 0}
+var acknowledgedCells = stubs.New(nil, 0)
 var exit = make(chan struct {})
 var brokerAddr = "127.0.0.1:9000"
 var listenAddr = ":9010"
@@ -123,7 +123,7 @@ func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distr
 		}
 	}
 }
-
+// TODO: test with 1 worker
 // distributor distributes the work to the broker via rpc calls
 func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	// provide global info for rpc call handlers to use
@@ -146,27 +146,39 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	}
 	eventsSender.SendFlippedCellList(0, cellsList...)
 	acknowledgedCells.Update(cellsList, 0)
+
 	// dial the Broker. This is a hardcoded address
-	client, _ := rpc.Dial("tcp", brokerAddr)
+	client, err := rpc.Dial("tcp", brokerAddr)
+	if err != nil {
+		fmt.Println("error when dialing broker")
+	}
 	defer client.Close()
 
+	
+	// initialise ticker
+	exit := make(chan struct {})
+	defer close(exit)
+	// go aliveCellsTicker(client, c, exit)
+
+	// start broker receiver
+	go receiver(exit)
+	
+	// connect to the broker
+	connReq := stubs.ConnectRequest{IP: stubs.IPAddress("127.0.0.1" + listenAddr)}
+	connRes := new(stubs.ConnectResponse)
+	connErr := client.Call(stubs.ConConnect, connReq, connRes)
+	if connErr != nil {
+		fmt.Println(connErr)
+	}
+	
+	// start keypress listener
+	go kpListener(kp, client, exit, c, p)
+	
+	// execute rpc
 	cells, _ := acknowledgedCells.Get()
 	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight }
 	request := stubs.StartGOLRequest{Cells: cells, P: stubParams}
 	response := new(stubs.StatusResponse)
-
-	// initialise ticker
-	exit := make(chan struct {})
-	defer close(exit)
-	go aliveCellsTicker(client, c, exit)
-
-	// start broker receiver
-	go receiver(exit)
-
-	// start keypress listener
-	go kpListener(kp, client, exit, c, p)
-
-	// execute rpc
 	done := make(chan struct{})
 	go func () {
 		err := client.Call(stubs.StartGOL, request, response)
@@ -204,7 +216,7 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 
 type Controller struct {}
 
-func (c *Controller) PushState(req stubs.PushStateBody, res stubs.StatusResponse) (err error) {
+func (c *Controller) PushState(req stubs.PushStateBody, res *stubs.StatusResponse) (err error) {
 	acknowledgedCells.Update(req.Cells, req.Turn)
 	eventsSender.SendFlippedCellList(req.Turn, req.Cells...)
 	res.Status = stubs.Running
@@ -213,7 +225,7 @@ func (c *Controller) PushState(req stubs.PushStateBody, res stubs.StatusResponse
 
 func receiver(exit chan struct{}) {
 	rpc.Register(&Controller{})
-	listener, _ := net.Listen("tcp", ":" + listenAddr)
+	listener, _ := net.Listen("tcp", listenAddr)
 	defer listener.Close()
 	go rpc.Accept(listener)
 	<-exit

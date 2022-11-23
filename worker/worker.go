@@ -16,8 +16,30 @@ type Worker struct {
 	internalState [][]byte
 }
 
+// creates a 2d slice with dimensions (work slice) + halo
+func (w *Worker) initialiseState(req stubs.Work) {
+	worker := &Worker{}
+	// take into account the halos
+	worker.internalState = make([][]byte, req.State.P.ImageHeight + 2)
+	for i := range(worker.internalState) {
+		worker.internalState[i] = make([]byte, req.State.P.ImageWidth + 2)
+	}
+	return
+}
+
+var thisWorker *Worker
+
 func (w *Worker) EvolveSlice(req stubs.Work, res stubs.Work) (err error) {
 	
+	res.StartRow, res.EndRow = req.StartRow, req.EndRow
+	for i := req.StartRow; i < req.EndRow; i++ {
+		for j := 0; j < req.State.P.ImageWidth; j++ {
+			w.internalState[i - req.StartRow]
+		}
+	}
+	state := stubs.PushStateBody{Turn: req.State.Turn + 1, P: req.State.P, Id: id}
+	// TODO: evolve the slice
+	// TODO: update internal state
 	return
 }
 

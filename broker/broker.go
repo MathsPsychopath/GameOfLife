@@ -39,10 +39,7 @@ type Pause struct {
 }
 
 var id = 0
-var state = stubs.CellsContainer{
-	Cells: nil,
-	Turn: -1,
-}
+var state = stubs.New(nil, 0)
 var exit = make(chan bool)
 var pause = Pause{isPaused: false}
 
@@ -89,7 +86,7 @@ func sendWork(b *Broker, req stubs.StartGOLRequest) bool {
 }
 
 // This sends the world's state
-func (b *Broker) SaveState(req stubs.NilRequest, res stubs.PushStateBody) (err error) {
+func (b *Broker) SaveState(req stubs.NilRequest, res *stubs.PushStateBody) (err error) {
 	if state.Cells == nil {
 		return errors.New("could not find world to save")
 	}
@@ -98,13 +95,14 @@ func (b *Broker) SaveState(req stubs.NilRequest, res stubs.PushStateBody) (err e
 }
 
 // This will start the GOL process and send processed turns back to client
-func (b *Broker) StartGOL(req stubs.StartGOLRequest, res stubs.StatusResponse) (err error) {
+func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.StatusResponse) (err error) {
 	for turn := 0; turn < req.P.Turns; turn++ {
 		pause.pauseGOL.Wait()
 		if b.controller == nil {
 			fmt.Println("could not find controller")
 			return
 		}
+		// if len(b.workers) == 0 then wait until a worker connects
 		success := false
 		// repeat if not successful
 		for !success {
@@ -121,21 +119,22 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res stubs.StatusResponse) (
 }
 
 // This will initialise the server -> client communication
-func (b *Broker) ConConnect(req stubs.ConnectRequest, res stubs.ConnectResponse) (err error) {
+func (b *Broker) ConConnect(req stubs.ConnectRequest, res *stubs.ConnectResponse) (err error) {
 	b.mu.Lock()
+	fmt.Println("received controller connect request")
 	b.controller, _ = rpc.Dial("tcp", string(req.IP))
 	b.mu.Unlock()
 	return
 }
 
 // This will return the alive cells
-func (b *Broker) GetAlive(req stubs.NilRequest, res stubs.PushStateBody) (err error) {
+func (b *Broker) GetAlive(req stubs.NilRequest, res *stubs.PushStateBody) (err error) {
 	res.Cells, res.Turn = state.Get()
 	return
 }
 
 // This will close the workers, broker and send the latest state back
-func (b *Broker) SerQuit(req stubs.NilRequest, res stubs.PushStateBody) (err error) {
+func (b *Broker) SerQuit(req stubs.NilRequest, res *stubs.PushStateBody) (err error) {
 	b.mu.Lock()
 	for _, worker := range(b.workers) {
 		res := new(stubs.StatusResponse)
@@ -149,7 +148,7 @@ func (b *Broker) SerQuit(req stubs.NilRequest, res stubs.PushStateBody) (err err
 	return
 }
 
-func (b *Broker) PauseState(req stubs.NilRequest, res stubs.StatusResponse) (err error) {
+func (b *Broker) PauseState(req stubs.NilRequest, res *stubs.StatusResponse) (err error) {
 	if pause.isPaused {
 		pause.pauseGOL.Done()
 		res.Status = stubs.Running
@@ -162,13 +161,24 @@ func (b *Broker) PauseState(req stubs.NilRequest, res stubs.StatusResponse) (err
 	return
 }
 
-func (b *Broker) ConQuit(req stubs.NilRequest, res stubs.StatusResponse) (err error) {
+func (b *Broker) ConQuit(req stubs.NilRequest, res *stubs.StatusResponse) (err error) {
 	b.mu.Lock()
 	b.controller.Close()
 	b.controller = nil
 	b.mu.Unlock()
 	res.Status = stubs.Terminated
 	return
+}
+
+func (b *Broker) Connect(req stubs.ConnectRequest, res *stubs.ConnectResponse) (err error) {
+	b.mu.Lock()
+	client, err := rpc.Dial("tcp", string(req.IP))
+	if err != nil {
+		fmt.Println(err)
+	}
+	b.workers = append(b.workers, Worker{id: id, client: client})
+	id++
+	return 
 }
 
 func main() {
