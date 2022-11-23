@@ -28,16 +28,27 @@ def getTimeTaken(line):
     index = line.index(" ns/op") - 1
     # read numbers in backwards until whitespace
     number = ""
-    while (line[index] != ' '):
+    while (line[index] >= '0' and line[index] <= '9'):
         number = line[index] + number
         index -= 1
     return int(number)
 
-def plot(imageSize, threadTimeDict):
+def getTurns(line):
+    # find index just after "turns="
+    index = line.index("turns=") + 6
+    # get number
+    number = ""
+    while line[index] != '_':
+        number += line[index]
+        index += 1
+    return int(number)
+    
+    
+def plot(imageSize, threadTimeDict, turns):
     threads = threadTimeDict.keys()
     time = threadTimeDict.values()
     plt.bar(threads, time)
-    title = "{imageSize}x{imageSize}".format(imageSize=imageSize)
+    title = "{imageSize}x{imageSize} for {turns} turns".format(imageSize=imageSize, turns=turns)
     plt.title(title)
     fname = "{imageSize}x{imageSize}.jpg".format(imageSize=imageSize)
     plt.xlabel("number of threads")
@@ -60,8 +71,8 @@ def main():
         # get image-size and thread count
         # make maps for each image-size of thread-count: time taken
         # plot maps
-        
-        imageSizesMap = dict()
+    turns = getTurns(lines[0])
+    imageSizesMap = dict()
     for line in lines:
         imageSize = getImageSize(line)
         threadCount = getThreadCount(line)
@@ -73,7 +84,7 @@ def main():
         imageSizesMap[imageSize][threadCount] = floatTimeTaken
     
     for key, value in imageSizesMap.items():
-        plot(key, value)
+        plot(key, value, turns)
         print()
 
 
