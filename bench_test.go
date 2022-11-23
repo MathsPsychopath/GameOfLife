@@ -8,23 +8,22 @@ import (
 )
 
 func BenchmarkLocal(b *testing.B) {
-	turnConfs := []int{1}
-	threadConfs := []int{1, 2, 3, 4, 5} //, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	turns := 1
+	threadConfs := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	imageConfs := []int{16, 64, 128, 256, 512}
-	for _, threads := range threadConfs {
-		for _, imageSize := range imageConfs {
-			for _, turns := range turnConfs {
-				p := gol.Params{
-					Turns:       turns,
-					Threads:     threads,
-					ImageWidth:  imageSize,
-					ImageHeight: imageSize,
-				}
-				name := fmt.Sprintf("%dx%d_%d-threads_%d-turns", imageSize, imageSize, threads, turns)
-				b.Run(name, func(b *testing.B) {
-					benchmark(b, p)
-				})
+
+	for _, imageSize := range imageConfs {
+		for _, threads := range threadConfs {
+			p := gol.Params{
+				Turns:       turns,
+				Threads:     threads,
+				ImageWidth:  imageSize,
+				ImageHeight: imageSize,
 			}
+			name := fmt.Sprintf("size=%dx%d_threads=%d_", imageSize, imageSize, threads)
+			b.Run(name, func(b *testing.B) {
+				benchmark(b, p)
+			})
 		}
 	}
 
