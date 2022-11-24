@@ -25,3 +25,7 @@ func (s *Sender) SendFlippedCellList(turn int, cells ...util.Cell) {
 func (s *Sender) SendFinalTurn(turn int, cells []util.Cell) {
 	s.Events <- FinalTurnComplete{CompletedTurns: turn, Alive: cells}
 }
+
+func (s *Sender) SendTurnComplete(turn int) {
+	s.Events <- TurnComplete{CompletedTurns: turn}
+}

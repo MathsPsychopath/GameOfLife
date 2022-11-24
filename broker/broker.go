@@ -42,6 +42,7 @@ var id = 0
 var state = stubs.New(nil, 0)
 var exit = make(chan bool)
 var pause = Pause{isPaused: false}
+var workerConnected = make(chan int)
 
 // Sends work to all clients registered in Broker.workers
 func sendWork(b *Broker, req stubs.StartGOLRequest) bool {
@@ -102,7 +103,11 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.StatusResponse) 
 			fmt.Println("could not find controller")
 			return
 		}
-		// if len(b.workers) == 0 then wait until a worker connects
+		if len(b.workers) == 0 {
+			fmt.Println("Waiting for workers to connect")
+			<-workerConnected
+			fmt.Println("Worker has connected!")
+		}
 		success := false
 		// repeat if not successful
 		for !success {
@@ -175,16 +180,23 @@ func (b *Broker) Connect(req stubs.ConnectRequest, res *stubs.ConnectResponse) (
 	client, err := rpc.Dial("tcp", string(req.IP))
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 	b.workers = append(b.workers, Worker{id: id, client: client})
 	id++
+	select {
+	case workerConnected <- id:
+	default:
+	}
 	return 
 }
 
 func main() {
 	pAddr := flag.String("port", "9000", "Port to listen on")
     flag.Parse()
-	rpc.Register(&Broker{})
+	broker := &Broker{}
+	broker.mu = new(sync.Mutex)
+	rpc.Register(broker)
 
     listener, err := net.Listen("tcp", ":" + *pAddr)
 	if err != nil {

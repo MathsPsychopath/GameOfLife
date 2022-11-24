@@ -145,6 +145,7 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 		}
 	}
 	eventsSender.SendFlippedCellList(0, cellsList...)
+	eventsSender.SendTurnComplete(0)
 	acknowledgedCells.Update(cellsList, 0)
 
 	// dial the Broker. This is a hardcoded address
