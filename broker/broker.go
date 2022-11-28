@@ -6,201 +6,158 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
-	"sync"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-type Worker struct {
-	client   *rpc.Client
-	id        int
-}
-
-type Broker struct {
-	mu      	 *sync.Mutex
-	workers     []Worker
-	controller 	 *rpc.Client
-}
-
-func (b *Broker) removeWorker(id int) {
-	filteredWorkers := make([]Worker, 2)
-	for _,worker := range(b.workers) {
-		if (worker.id != id) {
-			filteredWorkers = append(filteredWorkers, worker)
-		}
-	}
-	b.workers = filteredWorkers
-}
-
-type Pause struct {
-	pauseGOL sync.WaitGroup
-	isPaused bool
-}
-
-var id = 0
-var state = stubs.New(nil, 0)
 var exit = make(chan bool)
-var pause = Pause{isPaused: false}
-var workerConnected = make(chan int)
+var workerConnected = make(chan bool)
 
-// Sends work to all clients registered in Broker.workers
-func sendWork(b *Broker, req stubs.StartGOLRequest) bool {
-	var waitgroup sync.WaitGroup
-	success := false
-	var faultyId int = -1
-	newCells := make([]util.Cell, 10000)
-
-	b.mu.Lock()
-	for i, worker := range(b.workers) {
-		waitgroup.Add(1)
-		// define work
-		cells, turn := state.Get()
-		reqState := stubs.PushStateBody{
-			Id: worker.id, Cells: cells, Turn: turn, P: req.P,
-		}
-		req := stubs.Work{
-			StartRow: i, EndRow: i+1, State: reqState,
-		}
-		res := new(stubs.Work)
-
-		// try doing work
-		go func (worker Worker) {
-			err := worker.client.Call(stubs.EvolveSlice, req, res)
-			newCells = append(newCells, res.State.Cells...)
-			waitgroup.Done()
-
-			if err != nil {
-				// something went wrong mid-turn, so report failure
-				faultyId = worker.id
-				success = false
-			}
-		} (worker)
+// initialises bidirectional comms with controller
+func (b *Broker) ControllerConnect(req stubs.ConnectRequest, res *stubs.NilResponse) (err error) {
+	fmt.Println("Received controller connect request")
+	client, dialError := rpc.Dial("tcp", string(req.IP))
+	if dialError != nil {
+		err = errors.New("broker > we couldn't dial your IP address of " + string(req.IP))
+		return
 	}
-	waitgroup.Wait()
-	// delete faulty worker
-	if faultyId != -1 {
-		b.removeWorker(faultyId)
+	alreadyExistsError := b.setController(client)
+	if alreadyExistsError != nil {
+		return alreadyExistsError
 	}
-	b.mu.Unlock()
-	return success
-}
-
-// This sends the world's state
-func (b *Broker) SaveState(req stubs.NilRequest, res *stubs.PushStateBody) (err error) {
-	if state.Cells == nil {
-		return errors.New("could not find world to save")
-	}
-	res.Cells, res.Turn = state.Get()
+	fmt.Println("Controller connected successfully!")
 	return
 }
 
-// This will start the GOL process and send processed turns back to client
-func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.StatusResponse) (err error) {
+// starts the Game of Life Loop
+func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (err error) {
+	// define state to evolve from
+	b.setParams(req.P)
+	b.initialiseWorld(req.InitialAliveCells)
+
+	// if controller connects before any workers, block
+	if (len(b.Workers) == 0) {
+		fmt.Println("Waiting for workers to connect")
+		<-workerConnected
+		fmt.Println("Worker has connected!")
+	}
+	b.primeWorkers() // this is called serially so no mutex
+	acknowledgedWorkers := getWorkerKeys(b.Workers)
 	for turn := 0; turn < req.P.Turns; turn++ {
-		pause.pauseGOL.Wait()
-		if b.controller == nil {
-			fmt.Println("could not find controller")
-			return
-		}
-		if len(b.workers) == 0 {
+		fmt.Println("worker map: ", b.Workers)
+		fmt.Println("acknowledged workers: ", acknowledgedWorkers)
+		b.Pause.Wait()
+		hasReprimed := false || turn == 0
+		// check for any additions or disconnects
+		if len(b.Workers) == 0 {
 			fmt.Println("Waiting for workers to connect")
 			<-workerConnected
 			fmt.Println("Worker has connected!")
 		}
-		success := false
-		// repeat if not successful
-		for !success {
-			success = sendWork(b, req)
-		} 
-		cells, _ := state.Get()
-		req := stubs.PushStateBody{Turn: turn, Cells: cells, P: req.P}
-		res := new(stubs.StatusResponse)
-		b.mu.Lock()
-		b.controller.Call(stubs.PushState, req, res)
-		b.mu.Unlock()
+		if !b.isSameWorkers(acknowledgedWorkers) {
+			fmt.Println("workers sequence has changed")
+			hasReprimed, acknowledgedWorkers = b.handleWorkerChanges()
+		}
+		
+		var flippedCells []util.Cell
+		var success bool
+		var faultyWorkerIds = []int{}
+		b.Mu.Lock()
+		if len(b.Workers) == 1 {
+			// do single worker GOL
+			flippedCells, success, faultyWorkerIds = b.singleWorkerGOL(hasReprimed, acknowledgedWorkers)
+		} else {
+			if len(b.Workers) != 0 {
+				// slice the world and distribute it to workers
+				flippedCells, success, faultyWorkerIds = b.multiWorkerGOL(hasReprimed, acknowledgedWorkers)
+			}
+		}
+		b.Mu.Unlock()
+		
+		if !success {
+			//repeat processing
+			b.removeWorkersFromRegister(false, faultyWorkerIds...)
+			turn--
+			fmt.Println("Worker(s) had an error, repeating without them")
+			continue
+		}
+		fmt.Println("successful turn. sending results")
+		b.Mu.Lock()
+		// consolidate and apply changes
+		b.applyChanges(flippedCells)
+		// rpc controller with flipped cells
+		b.Controller.Call(stubs.PushState, stubs.PushStateRequest{FlippedCells: flippedCells, Turn: turn}, new(stubs.NilResponse))
+		b.Mu.Unlock()
 	}
+	// after GOL, remove the controller
+	defer b.Controller.Close()
+	b.removeController()
 	return
 }
 
-// This will initialise the server -> client communication
-func (b *Broker) ConConnect(req stubs.ConnectRequest, res *stubs.ConnectResponse) (err error) {
-	b.mu.Lock()
-	fmt.Println("received controller connect request")
-	b.controller, _ = rpc.Dial("tcp", string(req.IP))
-	b.mu.Unlock()
+// kills every worker and halts the broker
+func (b *Broker) ServerQuit(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
+	b.killWorkers()
+	defer func(){exit <- true}()
 	return
 }
 
-// This will return the alive cells
-func (b *Broker) GetAlive(req stubs.NilRequest, res *stubs.PushStateBody) (err error) {
-	res.Cells, res.Turn = state.Get()
+// remove the controller on voluntary request
+func (b *Broker) ControllerQuit(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
+	b.Mu.Lock()
+	b.Controller.Close()
+	b.Mu.Unlock()
+	defer b.removeController()
 	return
 }
 
-// This will close the workers, broker and send the latest state back
-func (b *Broker) SerQuit(req stubs.NilRequest, res *stubs.PushStateBody) (err error) {
-	b.mu.Lock()
-	for _, worker := range(b.workers) {
-		res := new(stubs.StatusResponse)
-		worker.client.Call(stubs.Shutdown, stubs.NilRequest{}, res)
-		worker.client.Close()
-	}
-	b.controller.Close()
-	defer func(){ exit <- true }()
-	b.mu.Unlock()
-	res.Cells, res.Turn = state.Get()
-	return
-}
-
-func (b *Broker) PauseState(req stubs.NilRequest, res *stubs.StatusResponse) (err error) {
-	if pause.isPaused {
-		pause.pauseGOL.Done()
-		res.Status = stubs.Running
-		_, res.Turn = state.Get()
+// pauses the game of life loop
+func (b *Broker) PauseState(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
+	if b.isPaused {
+		b.Pause.Done()
+		b.isPaused = false
 	} else {
-		pause.pauseGOL.Add(1)
-		res.Status = stubs.Running
-		_, res.Turn = state.Get()
+		b.Pause.Add(1)
+		b.isPaused = true
 	}
 	return
 }
 
-func (b *Broker) ConQuit(req stubs.NilRequest, res *stubs.StatusResponse) (err error) {
-	b.mu.Lock()
-	b.controller.Close()
-	b.controller = nil
-	b.mu.Unlock()
-	res.Status = stubs.Terminated
-	return
-}
-
-func (b *Broker) Connect(req stubs.ConnectRequest, res *stubs.ConnectResponse) (err error) {
-	b.mu.Lock()
-	client, err := rpc.Dial("tcp", string(req.IP))
-	if err != nil {
-		fmt.Println(err)
-		return
+// connects worker to broker
+func (b *Broker) WorkerConnect(req stubs.ConnectRequest, res *stubs.ConnectResponse) (err error) {
+	fmt.Println("Received worker connect request")
+	client, dialError := rpc.Dial("tcp", string(req.IP))
+	if dialError != nil {
+		err = errors.New("broker > could not dial IP " + string(req.IP))
 	}
-	b.workers = append(b.workers, Worker{id: id, client: client})
-	id++
+	res.Id = b.NextID
+	b.addWorker(client)
+	b.Mu.Lock()
+	b.primeWorkers()
+	b.Mu.Unlock()
 	select {
-	case workerConnected <- id:
+	case workerConnected <- true:
 	default:
 	}
-	return 
+	fmt.Println("Worker connected successfully!")
+	return
+}
+
+func (b *Broker) WorkerDisconnect(req stubs.RemoveRequest, res *stubs.NilResponse) (err error) {
+	b.removeWorkersFromRegister(true, req.Id)
+	fmt.Println("removed worker #", req.Id)
+	return
 }
 
 func main() {
 	pAddr := flag.String("port", "9000", "Port to listen on")
     flag.Parse()
-	broker := &Broker{}
-	broker.mu = new(sync.Mutex)
-	rpc.Register(broker)
+	rpc.Register(NewBroker())
 
     listener, err := net.Listen("tcp", ":" + *pAddr)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("could not listen on port " + *pAddr)
 	}
     defer listener.Close()
     go rpc.Accept(listener)

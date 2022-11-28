@@ -7,28 +7,38 @@ import (
 )
 
 type CellsContainer struct {
-	Mu 		*sync.Mutex
-	Cells   []util.Cell
-	Turn    int
+	Mu 				*sync.Mutex
+	CurrentWorld 	[][]byte
+	Turn    		int
 }
 
-func New(c []util.Cell, t int) *CellsContainer {
+// initialise the container with a mutex lock
+func NewCellsContainer() *CellsContainer {
 	container := &CellsContainer{}
 	container.Mu = new(sync.Mutex)
-	container.Cells = c
-	container.Turn = t
 	return container
 }
 
-func (c *CellsContainer) Get() ([]util.Cell, int) {
+// set the container to point to some initial state
+func (c *CellsContainer) InitialiseWorld(world [][]byte) {
 	c.Mu.Lock()
-	defer c.Mu.Unlock()
-	return c.Cells, c.Turn
+	c.CurrentWorld = world
+	c.Mu.Unlock()
 }
 
-func (c *CellsContainer) Update(k []util.Cell, turn int) {
+// update the current world with the flipped cells
+func (c *CellsContainer) UpdateWorld(flippedCells []util.Cell, turn int) {
 	c.Mu.Lock()
-	c.Cells = k
 	c.Turn = turn
+	for _, cell := range flippedCells {
+		// inversion faster without branching
+		c.CurrentWorld[cell.Y][cell.X] ^= 0xFF
+	}
 	c.Mu.Unlock()
+}
+
+func (c *CellsContainer) Get() ([][]byte, int) {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	return c.CurrentWorld, c.Turn
 }

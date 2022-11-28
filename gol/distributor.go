@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
-	"strconv"
-	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
-	util "uk.ac.bris.cs/gameoflife/util"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type distributorChannels struct {
@@ -20,169 +18,126 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-var acknowledgedCells = stubs.New(nil, 0)
-var exit = make(chan struct {})
+var acknowledgedCells = stubs.NewCellsContainer()
 var brokerAddr = "127.0.0.1:9000"
-var listenAddr = ":9010"
+var listenAddr = ":8090"
 var eventsSender Sender
 
-// parameterizable 2D slice creator (rows x columns)
-func createNewSlice(rows, columns int) [][]byte {
-	world := make([][]byte, rows)
-	for i := range world {
-		world[i] = make([]byte, columns)
-	}
-	return world
-}
+// // execute RPC calls to poll the number of alive cells every 2 seconds
+// func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan struct {}) {
+// 	ticker := time.NewTicker(2 * time.Second)
+// 	defer ticker.Stop()
+// 	for {
+// 		select {
+// 		case <- exit:
+// 			return
+// 		case <- ticker.C:
+// 			world, turn := acknowledgedCells.Get()
+// 			eventsSender.SendAliveCellsList(turn, stubs.SquashSlice(world))
+// 		}
+// 	}
+// }
 
-// convert []util.Cell to a 2D slice
-func populateWorld(cells []util.Cell, p Params) [][]byte {
-	world := createNewSlice(p.ImageHeight, p.ImageWidth)
-	for _, aliveCell := range cells {
-		world[aliveCell.Y][aliveCell.X] = 0xFF
-	}
-	return world
-}
+// func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distributorChannels, p Params) {
+// 	for {
+// 		key := <-kp
+// 		switch key {
+// 		case 's':
+// 			//output a pgm image
+// 			world, turn := acknowledgedCells.Get()
+// 			eventsSender.SendOutputPGM(world, turn)
+// 		case 'q':
+// 			//close the local controller
+// 			res := new(stubs.StatusResponse)
+// 			err := client.Call(stubs.ConQuit, stubs.NilRequest{}, res)
+// 			if err != nil {
+// 				fmt.Println(err)
+// 			}
 
-// execute RPC calls to poll the number of alive cells every 2 seconds
-func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan struct {}) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	res := new(stubs.PushStateBody)
-	for {
-		select {
-		case <- exit:
-			return
-		case <- ticker.C:
-			client.Call(stubs.GetAlive, stubs.NilRequest{}, res)
-			eventsSender.SendAliveCellsList(res.Turn, res.Cells)
-		}
-	}
-}
-
-// sends the correct events + data in channels for pgm output
-func outputPgm(c distributorChannels, p Params, cells []util.Cell, turn int) {
-	c.ioCommand <- ioOutput
-	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight) + "x" + strconv.Itoa(turn))
-
-	world := populateWorld(cells, p)	
-
-	for _, row := range world {
-		for _, cell := range row {
-			c.ioOutput <- cell
-		}
-	}
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
-}
-
-func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distributorChannels, p Params) {
-	for {
-		key := <-kp
-		switch key {
-		case 's':
-			//output a pgm image
-			res := new(stubs.PushStateBody)
-			client.Call(stubs.SaveState, stubs.NilRequest{}, res)
-			fmt.Println("sent Save call")
-			outputPgm(c, p, res.Cells, res.Turn)
-		case 'q':
-			//close the local controller
-			res := new(stubs.StatusResponse)
-			err := client.Call(stubs.ConQuit, stubs.NilRequest{}, res)
-			if err != nil {
-				fmt.Println(err)
-			}
-
-			eventsSender.SendStateChange(res.Turn, Quitting)
-			close(exit)
-		case 'k':
-			//kill the distributed system
-			res := new(stubs.PushStateBody)
-			fmt.Println("sent kill call")
-			err := client.Call(stubs.SerQuit, stubs.NilRequest{}, res)
-			if err != nil {
-				fmt.Println(err)
-			}
-			outputPgm(c, p, res.Cells, res.Turn)
+// 			eventsSender.SendStateChange(res.Turn, Quitting)
+// 			close(exit)
+// 		case 'k':
+// 			//kill the distributed system
+// 			res := new(stubs.PushStateBody)
+// 			fmt.Println("sent kill call")
+// 			err := client.Call(stubs.SerQuit, stubs.NilRequest{}, res)
+// 			if err != nil {
+// 				fmt.Println(err)
+// 			}
+// 			outputPgm(c, p, res.Cells, res.Turn)
 			
-			eventsSender.SendStateChange(res.Turn, Quitting)
-			close(exit)
-		case 'p':
-			//pause/unpause the processing
-			res := new(stubs.StatusResponse)
-			err := client.Call(stubs.PauseState, stubs.NilRequest{}, res)
-			if err != nil {
-				fmt.Println(err)
-			}
-			if res.Status == stubs.Paused {
-				eventsSender.SendStateChange(res.Turn, Paused)
-			} else {
-				eventsSender.SendStateChange(res.Turn, Executing)
-			}
-		}
-	}
-}
-// TODO: test with 1 worker
+// 			eventsSender.SendStateChange(res.Turn, Quitting)
+// 			close(exit)
+// 		case 'p':
+// 			//pause/unpause the processing
+// 			res := new(stubs.StatusResponse)
+// 			err := client.Call(stubs.PauseState, stubs.NilRequest{}, res)
+// 			if err != nil {
+// 				fmt.Println(err)
+// 			}
+// 			if res.Status == stubs.Paused {
+// 				eventsSender.SendStateChange(res.Turn, Paused)
+// 			} else {
+// 				eventsSender.SendStateChange(res.Turn, Executing)
+// 			}
+// 		}
+// 	}
+// }
+
 // distributor distributes the work to the broker via rpc calls
 func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	// provide global info for rpc call handlers to use
-	eventsSender = Sender{Events: c.events, P: p}
+	eventsSender = Sender{C: c, P: p}
 
-	// TODO: Give the filename to the io.channels.filename channel
-	c.ioCommand <- ioInput
-	// e.g., 64x64, 128x128 etc.
-	c.ioFilename <- (strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight))
-
-	cellsList := make([]util.Cell, 10000)
-	// TODO: Populate blank world with world data from input
-	for i := 0; i < p.ImageHeight; i++ {
-		for j := 0; j < p.ImageWidth; j++ {
-			if <-c.ioInput == 0xFF {
-				Cell := util.Cell{X:j, Y:i}
-				cellsList = append(cellsList, Cell)
-			}
-		}
-	}
-	eventsSender.SendFlippedCellList(0, cellsList...)
+	// load the initial world
+	cells := eventsSender.GetInitialAliveCells()
+	eventsSender.SendFlippedCellList(0, cells...)
 	eventsSender.SendTurnComplete(0)
-	acknowledgedCells.Update(cellsList, 0)
+	if p.ImageHeight == 16 {
+		util.VisualiseMatrix(stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth), 16,16)
+	}
+
+	// store the initial world in memory
+	acknowledgedCells.InitialiseWorld(
+		stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth),
+	)
+	
+	// initialise ticker
+	exit := make(chan bool)
+	defer func(){exit <- true}()
+	// go aliveCellsTicker(client, c, exit)
+	
+	// start listening for broker requests
+	isListening := make(chan bool)
+	go receiver(exit, isListening)
+	<-isListening
 
 	// dial the Broker. This is a hardcoded address
 	client, err := rpc.Dial("tcp", brokerAddr)
 	if err != nil {
 		fmt.Println("error when dialing broker")
+		return
 	}
 	defer client.Close()
-
-	
-	// initialise ticker
-	exit := make(chan struct {})
-	defer close(exit)
-	// go aliveCellsTicker(client, c, exit)
-
-	// start broker receiver
-	go receiver(exit)
 	
 	// connect to the broker
 	connReq := stubs.ConnectRequest{IP: stubs.IPAddress("127.0.0.1" + listenAddr)}
-	connRes := new(stubs.ConnectResponse)
-	connErr := client.Call(stubs.ConConnect, connReq, connRes)
+	connErr := client.Call(stubs.ControllerConnect, connReq, new(stubs.NilResponse))
 	if connErr != nil {
 		fmt.Println(connErr)
 	}
+
+	fmt.Println("Successfully connected to broker")
 	
 	// start keypress listener
-	go kpListener(kp, client, exit, c, p)
+	// go kpListener(kp, client, exit, c, p)
 	
 	// execute rpc
-	cells, _ := acknowledgedCells.Get()
 	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight }
-	request := stubs.StartGOLRequest{Cells: cells, P: stubParams}
-	response := new(stubs.StatusResponse)
+	request := stubs.StartGOLRequest{InitialAliveCells: cells, P: stubParams}
 	done := make(chan struct{})
 	go func () {
-		err := client.Call(stubs.StartGOL, request, response)
+		err := client.Call(stubs.StartGOL, request, new(stubs.NilResponse))
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -199,13 +154,17 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	case <-done:
 	}
 
-	// Get a slice of the alive cells
-	aliveCells, _ := acknowledgedCells.Get()
-
-	outputPgm(c, p, aliveCells, p.Turns)
+	// Get the final state of the world
+	world, turn := acknowledgedCells.Get()
+	fmt.Println(turn)
+	// Output the final image
+	eventsSender.SendOutputPGM(world, turn)
+	if p.ImageHeight == 16 {
+		util.VisualiseMatrix(world, 16, 16)
+	}
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-	eventsSender.SendFinalTurn(p.Turns, aliveCells)
+	eventsSender.SendFinalTurn(p.Turns, stubs.SquashSlice(world))
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -217,17 +176,27 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 
 type Controller struct {}
 
-func (c *Controller) PushState(req stubs.PushStateBody, res *stubs.StatusResponse) (err error) {
-	acknowledgedCells.Update(req.Cells, req.Turn)
-	eventsSender.SendFlippedCellList(req.Turn, req.Cells...)
-	res.Status = stubs.Running
+// This method will be called if the Broker has a calculated new state 
+// for the user to view in SDL window
+func (c *Controller) PushState(req stubs.PushStateRequest, res *stubs.NilResponse) (err error) {
+	acknowledgedCells.UpdateWorld(req.FlippedCells, req.Turn)
+
+	// util.VisualiseMatrix(acknowledgedCells.CurrentWorld, 16, 16)
+	eventsSender.SendFlippedCellList(req.Turn, req.FlippedCells...)
+	eventsSender.SendTurnComplete(req.Turn)
 	return
 }
 
-func receiver(exit chan struct{}) {
+func receiver(exit chan bool, listening chan<- bool) {
+	fmt.Println("starting controller listening")
 	rpc.Register(&Controller{})
-	listener, _ := net.Listen("tcp", listenAddr)
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		fmt.Println("could not listen on port " + listenAddr)
+		return
+	}
 	defer listener.Close()
 	go rpc.Accept(listener)
+	listening <- true
 	<-exit
 }

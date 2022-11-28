@@ -10,39 +10,77 @@ type StubParams struct {
 	ImageHeight int
 }
 
-// Controller -> Broker methods
-var StartGOL = "Broker.StartGOL"   		// req StartGOLRequest, sends StatusResponse  x
-var SaveState = "Broker.SaveState" 		// req NilRequest,      sends PushStateBody   x
-var SerQuit = "Broker.SerQuit" 	       	// req NilRequest, 		sends PushStateBody   x
-var ConQuit = "Broker.ConQuit"			// req NilRequest, 		sends StatusResponse  x
-var PauseState = "Broker.Pause" 		// req NilRequest, 		sends PushStateBody   x
-var GetAlive = "Broker.GetAlive"        // req NilRequest,      sends PushStateBody   x
-var ConConnect = "Broker.ConConnect"    // req ConnectRequest,  sends StatusResponse  x
- 
-// Broker -> Controller methods 
-var PushState = "Controller.PushState"  // req PushStateBody,   sends StatusResponse  x
- 
-// Broker -> Worker methods 
-var EvolveSlice = "Worker.EvolveSlice"  // req Work,       		sends Work 
-var Shutdown = "Worker.Shutdown"        // req NilRequest,      sends StatusResponse  x
- 
-// Worker -> Broker methods 
-var Connect = "Broker.Connect" 			// req ConnectRequest,  sends ConnectResponse x
+// # Controller -> Broker methods
 
-// Worker -> Worker methods
-// var PassHalo = "Worker.PassHalo"		// req PushStateBody,   sends PushStateBody
+// we use this to connect a controller to the Broker
+var ControllerConnect = "Broker.ControllerConnect"    	
+	// req ConnectRequest,  sends NilResponse  x
+	// - client must send Params and its own IP address it is listening for updates on
 
-type statusValue uint8
+// we use this to start thegame of life processing
+var StartGOL = "Broker.StartGOL"   				
+	// req StartGOLRequest, sends NilResponse  x
+	// - client must send the initial alive cells and params
+
+// we use this to do a clean shutdown of the distributed system
+var ServerQuit = "Broker.ServerQuit" 			
+	// req NilRequest, 		sends NilResponse   x
+
+// we use this to indicate the controller wants to quit
+var ControllerQuit = "Broker.ControllerQuit"	
+	// req NilRequest, 		sends NilResponse  x
+
+// we use this to indicate the controller wants to pause processing
+var PauseState = "Broker.Pause" 				
+	// req NilRequest, 		sends PauseResponse   x
+	// - server must send the turn currently being processed
+
+
+// # Broker -> Controller methods 
+
+// this method is used to update the controller what the new state is
+var PushState = "Controller.PushState"  
+	// req PushStateRequest,   sends NilResponse  x
+	// - the client must send the flipped cells from the previous and turn
+ 
+// # Broker -> Worker methods 
+
+// this method is used to prime the worker to start processing, or
+// to reset the worker in case another quits or is added
+var InitialiseWorker = "Worker.InitialiseWorker"
+	// req InitWorkerRequest, res NilResponse
+	// - client must send the Height, Width of slice; if its the only worker;
+
+// this method is used to send the work for processing
+var EvolveSlice = "Worker.EvolveSlice"  
+    // req WorkRequest,      sends WorkResponse
+	// - client must send the Halos if any, FlippedCells to work on
+	// - server must send NewSlice, 
+
+// this method is used to cleanly shutdown the worker
+var Shutdown = "Worker.Shutdown"        
+	// req NilRequest,      sends NilResponse  x
+
+// # Worker -> Broker methods 
+
+// this method is used by worker to connect to broker
+var WorkerConnect = "Broker.WorkerConnect" 			
+	// req ConnectRequest,  sends ConnectResponse x
+	// client must send the IP address it is listening on
+	// server must send id of the worker
+
+// this method is used by workers to cleanly disconnect
+var WorkerDisconnect = "Broker.WorkerDisconnect"
+	// req RemoveRequest, sends NilResponse
+	// client must send the id of itself
+
 type IPAddress   string
 
-const (
-	Running statusValue = iota
-	Paused
-	Terminated
-)
-
-// This request is a empty indicating a State change
+// No information needed request 
 type NilRequest struct {}
+
+// No information needed response
+type NilResponse struct {}
 
 // This request gives the broker the IP address a worker is listening on
 type ConnectRequest struct {
@@ -54,28 +92,43 @@ type ConnectResponse struct {
 	Id  int
 }
 
-// This response indicates if the processing is paused or not
-type StatusResponse struct {
-	Status statusValue
-	Turn   int
+// This request is sent by workers upon SIGINT
+type RemoveRequest struct {
+	Id int
+}
+
+// This response is given when 'p' is pressed
+type PauseResponse struct {
+	CurrentTurnProcessing int
 }
 
 // This request sends the data to the broker to process
 type StartGOLRequest struct {
-	Cells []util.Cell
-	P     StubParams
+	InitialAliveCells []util.Cell
+	P     				 StubParams
 }
 
 // This request sends current state of the world at turn
-type PushStateBody struct {
-	Cells []util.Cell
-	Turn  int
-	P     StubParams
-	Id    int
+type PushStateRequest struct {
+	FlippedCells 	[]util.Cell
+	Turn  	     	int
 }
 
-type Work struct {
-	State    PushStateBody
-	StartRow int
-	EndRow   int
+// This request sends the preliminary information to initialise the worker
+type InitWorkerRequest struct {
+	Height		  int
+	Width   	  int
+	WorkerIndex   int
+}
+
+// This request sends the halos and slice of world to work on
+type WorkRequest struct {
+	FlippedCells 	[]util.Cell
+	TopHalo     	[]util.Cell
+	BottomHalo  	[]util.Cell
+}
+
+// This response is sent by workers when work done
+type WorkResponse struct {
+	FlippedCells    []util.Cell
 }

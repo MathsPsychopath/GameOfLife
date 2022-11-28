@@ -1,31 +1,63 @@
 package gol
 
-import "uk.ac.bris.cs/gameoflife/util"
+import (
+	"strconv"
+
+	"uk.ac.bris.cs/gameoflife/util"
+)
 
 type Sender struct {
-	Events     chan<- Event
+	C 		   distributorChannels     
 	P 		   Params
 }
 
 func (s *Sender) SendStateChange(turn int, state State) {
-	s.Events <- StateChange{CompletedTurns: turn, NewState: state}
+	s.C.events <- StateChange{CompletedTurns: turn, NewState: state}
 	return
 }
 
 func (s *Sender) SendAliveCellsList(turn int, cells []util.Cell) {
-	s.Events <- AliveCellsCount{CompletedTurns: turn, CellsCount: len(cells)}
+	s.C.events <- AliveCellsCount{CompletedTurns: turn, CellsCount: len(cells)}
 }
 
 func (s *Sender) SendFlippedCellList(turn int, cells ...util.Cell) {
 	for _, cell := range(cells) {
-		s.Events <- CellFlipped{CompletedTurns: turn, Cell: cell}
+		s.C.events <- CellFlipped{CompletedTurns: turn, Cell: cell}
 	}
 }
 
 func (s *Sender) SendFinalTurn(turn int, cells []util.Cell) {
-	s.Events <- FinalTurnComplete{CompletedTurns: turn, Alive: cells}
+	s.C.events <- FinalTurnComplete{CompletedTurns: turn, Alive: cells}
 }
 
 func (s *Sender) SendTurnComplete(turn int) {
-	s.Events <- TurnComplete{CompletedTurns: turn}
+	s.C.events <- TurnComplete{CompletedTurns: turn}
+}
+
+func (s *Sender) GetInitialAliveCells() []util.Cell {
+	s.C.ioCommand <- ioInput
+	s.C.ioFilename <- (strconv.Itoa(s.P.ImageWidth) + "x" + strconv.Itoa(s.P.ImageHeight))
+
+	cells := []util.Cell{}
+	for i := 0; i < s.P.ImageHeight; i++ {
+		for j := 0; j < s.P.ImageWidth; j++ {
+			if <-s.C.ioInput == 0xFF {
+				cells = append(cells, util.Cell{X:j, Y: i})
+			}
+		}
+	}
+	return cells
+}
+
+func (s *Sender) SendOutputPGM(world [][]byte, turn int) {
+	s.C.ioCommand <- ioOutput
+	s.C.ioFilename <- (strconv.Itoa(s.P.ImageWidth) + "x" + strconv.Itoa(s.P.ImageHeight) + "x" + strconv.Itoa(turn))
+
+	for _, row := range world {
+		for _, cell := range row {
+			s.C.ioOutput <- cell
+		}
+	}
+	s.C.ioCommand <- ioCheckIdle
+	<-s.C.ioIdle
 }
