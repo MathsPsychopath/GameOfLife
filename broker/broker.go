@@ -84,6 +84,10 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 		}
 		fmt.Println("successful turn. sending results")
 		b.Mu.Lock()
+		if b.Controller == nil {
+			b.Mu.Unlock()
+			return
+		}
 		// consolidate and apply changes
 		b.applyChanges(flippedCells)
 		// rpc controller with flipped cells
@@ -98,6 +102,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 
 // kills every worker and halts the broker
 func (b *Broker) ServerQuit(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
+	b.Pause.Add(1)
 	b.killWorkers()
 	defer func(){exit <- true}()
 	return
@@ -113,7 +118,7 @@ func (b *Broker) ControllerQuit(req stubs.NilRequest, res *stubs.NilResponse) (e
 }
 
 // pauses the game of life loop
-func (b *Broker) PauseState(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
+func (b *Broker) PauseState(req stubs.NilRequest, res *stubs.PauseResponse) (err error) {
 	if b.isPaused {
 		b.Pause.Done()
 		b.isPaused = false

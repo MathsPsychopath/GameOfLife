@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+	"sync"
+	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
@@ -23,71 +25,81 @@ var brokerAddr = "127.0.0.1:9000"
 var listenAddr = ":8090"
 var eventsSender Sender
 
-// // execute RPC calls to poll the number of alive cells every 2 seconds
-// func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan struct {}) {
-// 	ticker := time.NewTicker(2 * time.Second)
-// 	defer ticker.Stop()
-// 	for {
-// 		select {
-// 		case <- exit:
-// 			return
-// 		case <- ticker.C:
-// 			world, turn := acknowledgedCells.Get()
-// 			eventsSender.SendAliveCellsList(turn, stubs.SquashSlice(world))
-// 		}
-// 	}
-// }
+// execute RPC calls to poll the number of alive cells every 2 seconds
+func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan bool) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <- exit:
+			return
+		case <- ticker.C:
+			world, turn := acknowledgedCells.Get()
+			eventsSender.SendAliveCellsList(turn, stubs.SquashSlice(world))
+		}
+	}
+}
 
-// func kpListener(kp <-chan rune, client *rpc.Client, exit chan struct {}, c distributorChannels, p Params) {
-// 	for {
-// 		key := <-kp
-// 		switch key {
-// 		case 's':
-// 			//output a pgm image
-// 			world, turn := acknowledgedCells.Get()
-// 			eventsSender.SendOutputPGM(world, turn)
-// 		case 'q':
-// 			//close the local controller
-// 			res := new(stubs.StatusResponse)
-// 			err := client.Call(stubs.ConQuit, stubs.NilRequest{}, res)
-// 			if err != nil {
-// 				fmt.Println(err)
-// 			}
-
-// 			eventsSender.SendStateChange(res.Turn, Quitting)
-// 			close(exit)
-// 		case 'k':
-// 			//kill the distributed system
-// 			res := new(stubs.PushStateBody)
-// 			fmt.Println("sent kill call")
-// 			err := client.Call(stubs.SerQuit, stubs.NilRequest{}, res)
-// 			if err != nil {
-// 				fmt.Println(err)
-// 			}
-// 			outputPgm(c, p, res.Cells, res.Turn)
-			
-// 			eventsSender.SendStateChange(res.Turn, Quitting)
-// 			close(exit)
-// 		case 'p':
-// 			//pause/unpause the processing
-// 			res := new(stubs.StatusResponse)
-// 			err := client.Call(stubs.PauseState, stubs.NilRequest{}, res)
-// 			if err != nil {
-// 				fmt.Println(err)
-// 			}
-// 			if res.Status == stubs.Paused {
-// 				eventsSender.SendStateChange(res.Turn, Paused)
-// 			} else {
-// 				eventsSender.SendStateChange(res.Turn, Executing)
-// 			}
-// 		}
-// 	}
-// }
+func kpListener(kp <-chan rune, client *rpc.Client, exit chan bool, c distributorChannels, p Params) {
+	for {
+		key := <-kp
+		switch key {
+		case 's':
+			//output a pgm image
+			world, turn := acknowledgedCells.Get()
+			eventsSender.SendOutputPGM(world, turn)
+		case 'q':
+			//close the local controller
+			_, turn := acknowledgedCells.Get()
+			client.Call(stubs.ControllerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
+			eventsSender.SendStateChange(turn, Quitting)
+			// make sure every goroutine dependent on exit is shutdown
+			eventsSender.mu.Lock()
+			for i := 0; i < 5; i++ {
+				select {
+				case exit <- true:
+				default:
+				}
+			}
+			eventsSender.mu.Unlock()
+		case 'k':
+			//kill the distributed system
+			fmt.Println("sent kill call")
+			err := client.Call(stubs.ServerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
+			if err != nil {
+				fmt.Println(err)
+			}
+			world, turn := acknowledgedCells.Get()
+			eventsSender.SendOutputPGM(world, turn)
+			eventsSender.SendStateChange(turn, Quitting)
+			// make sure every goroutine dependent on exit is shutdown
+			for i := 0; i < 5; i++ {
+				select {
+				case exit <- true:
+				default:
+				}
+			}
+		case 'p':
+			//pause/unpause the processing
+			res := new(stubs.PauseResponse)
+			err := client.Call(stubs.PauseState, stubs.NilRequest{}, res)
+			if err != nil {
+				fmt.Println(err)
+			}
+			_, turn := acknowledgedCells.Get()
+			if res.Status == stubs.Paused {
+				eventsSender.SendStateChange(turn, Paused)
+			} else {
+				eventsSender.SendStateChange(turn, Executing)
+			}
+		}
+	}
+}
 
 // distributor distributes the work to the broker via rpc calls
 func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	// provide global info for rpc call handlers to use
-	eventsSender = Sender{C: c, P: p}
+	eventsSender = Sender{C: c, P: p, mu: new(sync.Mutex)}
 
 	// load the initial world
 	cells := eventsSender.GetInitialAliveCells()
@@ -102,16 +114,15 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 		stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth),
 	)
 	
-	// initialise ticker
+	// initialise exit
 	exit := make(chan bool)
 	defer func(){exit <- true}()
-	// go aliveCellsTicker(client, c, exit)
 	
 	// start listening for broker requests
 	isListening := make(chan bool)
 	go receiver(exit, isListening)
 	<-isListening
-
+	
 	// dial the Broker. This is a hardcoded address
 	client, err := rpc.Dial("tcp", brokerAddr)
 	if err != nil {
@@ -119,6 +130,7 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 		return
 	}
 	defer client.Close()
+	go aliveCellsTicker(client, c, exit)
 	
 	// connect to the broker
 	connReq := stubs.ConnectRequest{IP: stubs.IPAddress("127.0.0.1" + listenAddr)}
@@ -130,7 +142,7 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	fmt.Println("Successfully connected to broker")
 	
 	// start keypress listener
-	// go kpListener(kp, client, exit, c, p)
+	go kpListener(kp, client, exit, c, p)
 	
 	// execute rpc
 	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight }

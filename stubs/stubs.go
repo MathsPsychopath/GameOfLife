@@ -1,6 +1,8 @@
 package stubs
 
-import "uk.ac.bris.cs/gameoflife/util"
+import (
+	"uk.ac.bris.cs/gameoflife/util"
+)
 
 // Params provides the details of how to run the Game of Life and which image to load.
 type StubParams struct {
@@ -31,7 +33,7 @@ var ControllerQuit = "Broker.ControllerQuit"
 	// req NilRequest, 		sends NilResponse  x
 
 // we use this to indicate the controller wants to pause processing
-var PauseState = "Broker.Pause" 				
+var PauseState = "Broker.PauseState" 				
 	// req NilRequest, 		sends PauseResponse   x
 	// - server must send the turn currently being processed
 
@@ -97,9 +99,16 @@ type RemoveRequest struct {
 	Id int
 }
 
+type StateValue uint8
+
+const (
+	Paused StateValue = iota
+	Running
+)
+
 // This response is given when 'p' is pressed
 type PauseResponse struct {
-	CurrentTurnProcessing int
+	Status StateValue
 }
 
 // This request sends the data to the broker to process
