@@ -96,10 +96,6 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 		}
 		// consolidate and apply changes
 		b.applyChanges(flippedCells)
-		if req.P.ImageWidth == 16 {
-			
-			util.VisualiseMatrix(b.CurrentWorld, 16, 16)
-		}
 		// rpc controller with flipped cells
 		req := stubs.PushStateRequest{FlippedCells: flippedCells, Turn: turn}
 		b.Controller.Call(stubs.PushState, req, new(stubs.NilResponse))

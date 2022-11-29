@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
-	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type distributorChannels struct {
@@ -104,20 +103,20 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	// load the initial world
 	cells := eventsSender.GetInitialAliveCells()
 	eventsSender.SendFlippedCellList(0, cells...)
-	eventsSender.SendTurnComplete(0)
-
+	
 	if p.Turns == 0 {
 		eventsSender.SendOutputPGM(stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth), 0)
 		eventsSender.SendFinalTurn(0, cells)
 		close(c.events)
 		return
 	}
+	eventsSender.SendTurnComplete(0)
 
 	// store the initial world in memory
 	acknowledgedCells.InitialiseWorld(
 		stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth),
 	)
-	
+
 	// initialise exit
 	exit := make(chan bool)
 	defer func(){exit <- true}()
@@ -178,11 +177,6 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	
 	// Output the final image
 	eventsSender.SendOutputPGM(world, turn + 1)
-
-	if p.ImageHeight == 16 {
-		fmt.Println("Final World State after ", turn, " turns")
-		util.VisualiseMatrix(world, 16, 16)
-	}	
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	eventsSender.SendFinalTurn(turn + 1, stubs.SquashSlice(world))

@@ -10,7 +10,7 @@ import "uk.ac.bris.cs/gameoflife/util"
 // squash a 2d slice into its alive cells.
 // There are no generics in this version of Go so convert to [][]byte
 func SquashSlice(slice [][]byte) []util.Cell {
-	cells := make([]util.Cell, 100)
+	cells := []util.Cell{}
 	for i, row := range(slice) {
 		for j, cell := range(row) {
 			if cell == 0xFF {
