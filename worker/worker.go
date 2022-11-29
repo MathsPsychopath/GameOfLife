@@ -38,6 +38,7 @@ func (w *Worker) EvolveSlice(req stubs.WorkRequest, res *stubs.WorkResponse) (er
 	var evolvedSlice [][]byte = createNewSlice(w.height, w.width)
 	if req.BottomHalo == nil {
 		// single worker game of life
+		fmt.Println("running single worker GOL")
 		w.container.Mu.Lock()
 		flipped = w.singleWorkerGOL(evolvedSlice)
 		w.container.Mu.Unlock()
@@ -47,6 +48,7 @@ func (w *Worker) EvolveSlice(req stubs.WorkRequest, res *stubs.WorkResponse) (er
 		return
 	}
 	// multi-worker game of life
+	fmt.Println("running multi-worker GOL")
 	topHalo := stubs.ConstructHalo(req.TopHalo, w.width)
 	bottomHalo := stubs.ConstructHalo(req.BottomHalo, w.width)
 

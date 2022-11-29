@@ -34,6 +34,12 @@ func (b *Broker) ControllerConnect(req stubs.ConnectRequest, res *stubs.NilRespo
 func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (err error) {
 	// define state to evolve from
 	b.setParams(req.P)
+	if req.P.Turns == 0 {
+		b.Mu.Lock()
+		b.Controller.Call(stubs.PushState, stubs.PushStateRequest{Turn: 0, FlippedCells: req.InitialAliveCells}, new(stubs.NilResponse))
+		b.Mu.Unlock()
+		return
+	}
 	b.initialiseWorld(req.InitialAliveCells)
 
 	// if controller connects before any workers, block
@@ -90,13 +96,15 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 		}
 		// consolidate and apply changes
 		b.applyChanges(flippedCells)
+		if req.P.ImageWidth == 16 {
+			
+			util.VisualiseMatrix(b.CurrentWorld, 16, 16)
+		}
 		// rpc controller with flipped cells
-		b.Controller.Call(stubs.PushState, stubs.PushStateRequest{FlippedCells: flippedCells, Turn: turn}, new(stubs.NilResponse))
+		req := stubs.PushStateRequest{FlippedCells: flippedCells, Turn: turn}
+		b.Controller.Call(stubs.PushState, req, new(stubs.NilResponse))
 		b.Mu.Unlock()
 	}
-	// after GOL, remove the controller
-	defer b.Controller.Close()
-	b.removeController()
 	return
 }
 

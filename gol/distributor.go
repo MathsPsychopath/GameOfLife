@@ -105,8 +105,12 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	cells := eventsSender.GetInitialAliveCells()
 	eventsSender.SendFlippedCellList(0, cells...)
 	eventsSender.SendTurnComplete(0)
-	if p.ImageHeight == 16 {
-		util.VisualiseMatrix(stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth), 16,16)
+
+	if p.Turns == 0 {
+		eventsSender.SendOutputPGM(stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth), 0)
+		eventsSender.SendFinalTurn(0, cells)
+		close(c.events)
+		return
 	}
 
 	// store the initial world in memory
@@ -125,11 +129,11 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	
 	// dial the Broker. This is a hardcoded address
 	client, err := rpc.Dial("tcp", brokerAddr)
+	defer client.Close()
 	if err != nil {
 		fmt.Println("error when dialing broker")
 		return
 	}
-	defer client.Close()
 	go aliveCellsTicker(client, c, exit)
 	
 	// connect to the broker
@@ -166,17 +170,22 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	case <-done:
 	}
 
+	// exit the broker
+	client.Call(stubs.ControllerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
+
 	// Get the final state of the world
 	world, turn := acknowledgedCells.Get()
-	fmt.Println(turn)
+	
 	// Output the final image
-	eventsSender.SendOutputPGM(world, turn)
+	eventsSender.SendOutputPGM(world, turn + 1)
+
 	if p.ImageHeight == 16 {
+		fmt.Println("Final World State after ", turn, " turns")
 		util.VisualiseMatrix(world, 16, 16)
-	}
+	}	
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-	eventsSender.SendFinalTurn(p.Turns, stubs.SquashSlice(world))
+	eventsSender.SendFinalTurn(turn + 1, stubs.SquashSlice(world))
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -193,7 +202,6 @@ type Controller struct {}
 func (c *Controller) PushState(req stubs.PushStateRequest, res *stubs.NilResponse) (err error) {
 	acknowledgedCells.UpdateWorld(req.FlippedCells, req.Turn)
 
-	// util.VisualiseMatrix(acknowledgedCells.CurrentWorld, 16, 16)
 	eventsSender.SendFlippedCellList(req.Turn, req.FlippedCells...)
 	eventsSender.SendTurnComplete(req.Turn)
 	return

@@ -54,10 +54,7 @@ func (w *Worker) singleWorkerNeighbourCount(row, column int) byte {
 		// if actualCol < 0 {
 		// 	actualCol = w.width - 1
 		// }
-		alive += (w.container.CurrentWorld[actualRow][actualCol] & 0xFF >> 7)
-	// 	if w.container.CurrentWorld[actualRow][actualCol] == 0xFF {
-	// 		alive++
-	// 	}
+		alive += ((w.container.CurrentWorld[actualRow][actualCol] & 0xFF) >> 7)
 	}
 	return alive
 }
@@ -70,7 +67,7 @@ func (w *Worker) singleWorkerGOL(newWorld [][]byte) []util.Cell {
 			neighbours := w.singleWorkerNeighbourCount(i, j)
 			newCell := w.useGOLRules(i, j, neighbours)
 			newWorld[i][j] = newCell
-			if cell ^ newCell == 0xff{
+			if cell != newCell {
 				flippedCells = append(flippedCells, util.Cell{X:j, Y: i})
 			}
 		}

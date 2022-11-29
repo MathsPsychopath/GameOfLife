@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"sync"
 
+	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -57,6 +58,10 @@ func (s *Sender) GetInitialAliveCells() []util.Cell {
 			}
 		}
 	}
+	if s.P.ImageHeight == 16 {
+		util.VisualiseMatrix(stubs.ConstructWorld(cells, 16, 16), 16, 16)
+	}
+
 	return cells
 }
 
