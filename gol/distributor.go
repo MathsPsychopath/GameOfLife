@@ -241,13 +241,14 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	// creating channels
 	workerOutputChannel := make(chan HorSlice, p.Threads)
 	var waitgroup sync.WaitGroup
-gol:
-	for ; turn < p.Turns; turn++ {
+	run := true
+
+	for ; turn < p.Turns && run; turn++ {
 		select {
 		case turnSender <- turn:
 		case kpStateUpdates <- HorSlice{grid: world, startRow: 0, endRow: 0}:
 		case <-quit:
-			break gol
+			run = false
 		default:
 		}
 		golLoop.Wait()
