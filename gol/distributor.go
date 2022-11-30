@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,8 +21,6 @@ type distributorChannels struct {
 }
 
 var acknowledgedCells = stubs.NewCellsContainer()
-var brokerAddr = "127.0.0.1:9000"
-var listenAddr = ":8090"
 var eventsSender Sender
 
 // execute RPC calls to poll the number of alive cells every 2 seconds
@@ -30,9 +29,9 @@ func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan boo
 	defer ticker.Stop()
 	for {
 		select {
-		case <- exit:
+		case <-exit:
 			return
-		case <- ticker.C:
+		case <-ticker.C:
 			world, turn := acknowledgedCells.Get()
 			eventsSender.SendAliveCellsList(turn, stubs.SquashSlice(world))
 		}
@@ -96,14 +95,14 @@ func kpListener(kp <-chan rune, client *rpc.Client, exit chan bool, c distributo
 }
 
 // distributor distributes the work to the broker via rpc calls
-func distributor(p Params, c distributorChannels,kp <-chan rune) {
+func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	// provide global info for rpc call handlers to use
 	eventsSender = Sender{C: c, P: p, mu: new(sync.Mutex)}
 
 	// load the initial world
 	cells := eventsSender.GetInitialAliveCells()
 	eventsSender.SendFlippedCellList(0, cells...)
-	
+
 	if p.Turns == 0 {
 		eventsSender.SendOutputPGM(stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth), 0)
 		eventsSender.SendFinalTurn(0, cells)
@@ -119,46 +118,49 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 
 	// initialise exit
 	exit := make(chan bool)
-	defer func(){exit <- true}()
-	
+	defer func() { exit <- true }()
+
 	// start listening for broker requests
 	isListening := make(chan bool)
-	go receiver(exit, isListening)
+	go receiver(exit, isListening, p)
 	<-isListening
-	
+
 	// dial the Broker. This is a hardcoded address
-	client, err := rpc.Dial("tcp", brokerAddr)
+	client, err := rpc.Dial("tcp", p.BrokerAddr)
 	defer client.Close()
 	if err != nil {
 		fmt.Println("error when dialing broker")
+		fmt.Printf("error message: %s\n", err)
+		fmt.Printf("broker address: %s\n", p.BrokerAddr)
 		return
 	}
 	go aliveCellsTicker(client, c, exit)
-	
+
 	// connect to the broker
-	connReq := stubs.ConnectRequest{IP: stubs.IPAddress("127.0.0.1" + listenAddr)}
+	listenSocket := p.ListenIP + ":" + strconv.Itoa(p.ListenPort)
+	connReq := stubs.ConnectRequest{IP: stubs.IPAddress(listenSocket)}
 	connErr := client.Call(stubs.ControllerConnect, connReq, new(stubs.NilResponse))
 	if connErr != nil {
 		fmt.Println(connErr)
 	}
 
 	fmt.Println("Successfully connected to broker")
-	
+
 	// start keypress listener
 	go kpListener(kp, client, exit, c, p)
-	
+
 	// execute rpc
-	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight }
+	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight}
 	request := stubs.StartGOLRequest{InitialAliveCells: cells, P: stubParams}
 	done := make(chan struct{})
-	go func () {
+	go func() {
 		err := client.Call(stubs.StartGOL, request, new(stubs.NilResponse))
 		if err != nil {
 			fmt.Println(err)
 		}
 		close(done)
 	}()
-		
+
 	// either the call finishes executing GOL, or exit closes first
 	// if exit closes first, then terminate main
 	// if call finishes executing, then do the image outputting
@@ -174,12 +176,12 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 
 	// Get the final state of the world
 	world, turn := acknowledgedCells.Get()
-	
+
 	// Output the final image
-	eventsSender.SendOutputPGM(world, turn + 1)
+	eventsSender.SendOutputPGM(world, turn+1)
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-	eventsSender.SendFinalTurn(turn + 1, stubs.SquashSlice(world))
+	eventsSender.SendFinalTurn(turn+1, stubs.SquashSlice(world))
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -189,9 +191,9 @@ func distributor(p Params, c distributorChannels,kp <-chan rune) {
 	close(c.events)
 }
 
-type Controller struct {}
+type Controller struct{}
 
-// This method will be called if the Broker has a calculated new state 
+// This method will be called if the Broker has a calculated new state
 // for the user to view in SDL window
 func (c *Controller) PushState(req stubs.PushStateRequest, res *stubs.NilResponse) (err error) {
 	acknowledgedCells.UpdateWorld(req.FlippedCells, req.Turn)
@@ -201,12 +203,12 @@ func (c *Controller) PushState(req stubs.PushStateRequest, res *stubs.NilRespons
 	return
 }
 
-func receiver(exit chan bool, listening chan<- bool) {
+func receiver(exit chan bool, listening chan<- bool, p Params) {
 	fmt.Println("starting controller listening")
 	rpc.Register(&Controller{})
-	listener, err := net.Listen("tcp", listenAddr)
+	listener, err := net.Listen("tcp", ":"+strconv.Itoa(p.ListenPort))
 	if err != nil {
-		fmt.Println("could not listen on port " + listenAddr)
+		fmt.Println("could not listen on port " + strconv.Itoa(p.ListenPort))
 		return
 	}
 	defer listener.Close()
