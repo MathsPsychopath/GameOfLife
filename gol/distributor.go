@@ -51,9 +51,6 @@ func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 	for _, offset := range offsets {
 		actualRow := (row + offset.X) & (p.ImageHeight - 1)
 		actualCol := (column + offset.Y) & (p.ImageWidth - 1)
-		if actualCol < 0 || actualRow < 0 {
-			fmt.Printf("actualrow: %d\nactualcol: %d\n", actualRow, actualCol)
-		}
 		if world[actualRow][actualCol] == 0xFF {
 			alive++
 		}
