@@ -11,15 +11,15 @@ import (
 )
 
 type Broker struct {
-	Mu   			*sync.Mutex
-	Workers			map[int]*rpc.Client
-	Controller  	*rpc.Client
-	NextID      	int
-	Pause       	sync.WaitGroup
-	isPaused    	bool
-	Params      	stubs.StubParams
-	CurrentWorld	[][]byte
-	workAllocation  []int
+	Mu             *sync.Mutex
+	Workers        map[int]*rpc.Client //for HALO exchange: we need to know which workers are next to each other. Solution: make Workers a map[(int, int)]*rpc.Client.
+	Controller     *rpc.Client
+	NextID         int
+	Pause          sync.WaitGroup
+	isPaused       bool
+	Params         stubs.StubParams
+	CurrentWorld   [][]byte
+	workAllocation []int
 }
 
 // initialises Broker struct
@@ -28,7 +28,7 @@ func NewBroker() *Broker {
 }
 
 // removes all worker ids from b.Workers map
-func (b *Broker) removeWorkersFromRegister( byWorker bool,ids ...int) {
+func (b *Broker) removeWorkersFromRegister(byWorker bool, ids ...int) {
 	b.Mu.Lock()
 	for _, id := range ids {
 		if byWorker {
@@ -69,7 +69,7 @@ func (b *Broker) removeController() {
 func divideEvenly(allocation, workersLeft int) []int {
 	work := make([]int, workersLeft)
 	workSize := allocation / workersLeft
-	remainder := allocation - workSize * workersLeft
+	remainder := allocation - workSize*workersLeft
 	for i := 0; i < workersLeft; i++ {
 		work[i] = workSize
 	}
@@ -89,8 +89,8 @@ func (b *Broker) primeWorkers() {
 	for i, worker := range b.Workers {
 		workSize := allocation[index]
 		initRequest := stubs.InitWorkerRequest{
-			Height: workSize,
-			Width:  b.Params.ImageWidth,
+			Height:      workSize,
+			Width:       b.Params.ImageWidth,
 			WorkerIndex: i,
 		}
 		worker.Call(stubs.InitialiseWorker, initRequest, new(stubs.NilResponse))
@@ -128,7 +128,7 @@ func (b *Broker) initialiseWorld(initialAliveCells []util.Cell) {
 func getWorkerKeys(m map[int]*rpc.Client) []int {
 	keys := []int{}
 	for key := range m {
-		keys = append(keys, key)		
+		keys = append(keys, key)
 	}
 	return keys
 }
@@ -151,7 +151,7 @@ func (b *Broker) isSameWorkers(ids []int) bool {
 }
 
 // called when sequence of workers changes. Will await worker to connect if none
-func (b *Broker) handleWorkerChanges() (hasReprimed bool, acknowledgedWorkers []int){
+func (b *Broker) handleWorkerChanges() (hasReprimed bool, acknowledgedWorkers []int) {
 	hasReprimed = true
 	b.Mu.Lock()
 	b.primeWorkers()
@@ -161,7 +161,7 @@ func (b *Broker) handleWorkerChanges() (hasReprimed bool, acknowledgedWorkers []
 }
 
 // executes 1 iteration of single worker GOL
-func (b *Broker) singleWorkerGOL(hasReprimed bool, acknowledgedWorkers []int) (changed []util.Cell, success bool, faultyWorkerIds []int){
+func (b *Broker) singleWorkerGOL(hasReprimed bool, acknowledgedWorkers []int) (changed []util.Cell, success bool, faultyWorkerIds []int) {
 	var workReq stubs.WorkRequest
 	if hasReprimed {
 		// repriming will make the worker empty
@@ -170,7 +170,7 @@ func (b *Broker) singleWorkerGOL(hasReprimed bool, acknowledgedWorkers []int) (c
 		}
 	} else {
 		// the worker will already have their own state
-		workReq = stubs.WorkRequest{ FlippedCells: nil, TopHalo: nil, BottomHalo: nil}
+		workReq = stubs.WorkRequest{FlippedCells: nil, TopHalo: nil, BottomHalo: nil}
 	}
 	workRes := new(stubs.WorkResponse)
 
@@ -181,13 +181,13 @@ func (b *Broker) singleWorkerGOL(hasReprimed bool, acknowledgedWorkers []int) (c
 		return
 	}
 	changed = workRes.FlippedCells
-	return 
+	return
 }
 
 // gets the slice for a worker, size = b.workAllocation
 func (b *Broker) getSectionSlice(workerNo, sliceStartIndex int) [][]byte {
-	fmt.Println(sliceStartIndex, sliceStartIndex + b.workAllocation[workerNo])
-	return b.CurrentWorld[sliceStartIndex: sliceStartIndex + b.workAllocation[workerNo]]
+	fmt.Println(sliceStartIndex, sliceStartIndex+b.workAllocation[workerNo])
+	return b.CurrentWorld[sliceStartIndex : sliceStartIndex+b.workAllocation[workerNo]]
 }
 
 // executes 1 iteration of Multi-worker GOL
@@ -202,7 +202,7 @@ func (b *Broker) multiWorkerGOL(hasReprimed bool, acknowledgedWorkers []int) (ch
 	for currentWorkerNo, id := range acknowledgedWorkers {
 		// assign halos to work request
 		workReq := stubs.WorkRequest{}
-		workReq.BottomHalo, workReq.TopHalo = 
+		workReq.BottomHalo, workReq.TopHalo =
 			b.getHalos(currentWorkerNo, sliceStartIndex, totalWorkers)
 
 		if hasReprimed {
@@ -220,7 +220,7 @@ func (b *Broker) multiWorkerGOL(hasReprimed bool, acknowledgedWorkers []int) (ch
 		workRes := new(stubs.WorkResponse)
 		b.Workers[id].Go(stubs.EvolveSlice, workReq, workRes, done)
 		go func(id int) {
-			res := <- done
+			res := <-done
 			localSuccess := res.Error == nil
 			if !localSuccess {
 				faultyWorkerIds = append(faultyWorkerIds, id)
@@ -254,28 +254,28 @@ func (b *Broker) getHalos(currentWorker, sliceStartIndex, totalWorkers int) (top
 	if currentWorker == 0 {
 		// this is the first slice
 		topHalo = stubs.SquashSlice(
-			[][]byte{ b.CurrentWorld[len(b.CurrentWorld)-1] },
+			[][]byte{b.CurrentWorld[len(b.CurrentWorld)-1]},
 		)
 		bottomHalo = stubs.SquashSlice(
-			[][]byte{ b.CurrentWorld[workSize] },
+			[][]byte{b.CurrentWorld[workSize]},
 		)
 		return
 	}
-	if currentWorker == totalWorkers - 1 {
+	if currentWorker == totalWorkers-1 {
 		// this is the last slice
 		topHalo = stubs.SquashSlice(
-			[][]byte{ b.CurrentWorld[ sliceStartIndex - 1]},
+			[][]byte{b.CurrentWorld[sliceStartIndex-1]},
 		)
 		bottomHalo = stubs.SquashSlice(
-			[][]byte{ b.CurrentWorld[0] },
+			[][]byte{b.CurrentWorld[0]},
 		)
 		return
 	}
 	topHalo = stubs.SquashSlice(
-		[][]byte{ b.CurrentWorld[sliceStartIndex - 1] },
+		[][]byte{b.CurrentWorld[sliceStartIndex-1]},
 	)
 	bottomHalo = stubs.SquashSlice(
-		[][]byte{ b.CurrentWorld[sliceStartIndex + workSize] },
+		[][]byte{b.CurrentWorld[sliceStartIndex+workSize]},
 	)
 	return
 }
