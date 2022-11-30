@@ -43,7 +43,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 	b.initialiseWorld(req.InitialAliveCells)
 
 	// if controller connects before any workers, block
-	if (len(b.Workers) == 0) {
+	if len(b.Workers) == 0 {
 		fmt.Println("Waiting for workers to connect")
 		<-workerConnected
 		fmt.Println("Worker has connected!")
@@ -65,7 +65,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 			fmt.Println("workers sequence has changed")
 			hasReprimed, acknowledgedWorkers = b.handleWorkerChanges()
 		}
-		
+
 		var flippedCells []util.Cell
 		var success bool
 		var faultyWorkerIds = []int{}
@@ -80,7 +80,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 			}
 		}
 		b.Mu.Unlock()
-		
+
 		if !success {
 			//repeat processing
 			b.removeWorkersFromRegister(false, faultyWorkerIds...)
@@ -108,7 +108,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 func (b *Broker) ServerQuit(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
 	b.Pause.Add(1)
 	b.killWorkers()
-	defer func(){exit <- true}()
+	defer func() { exit <- true }()
 	return
 }
 
@@ -145,10 +145,7 @@ func (b *Broker) WorkerConnect(req stubs.ConnectRequest, res *stubs.ConnectRespo
 	b.Mu.Lock()
 	b.primeWorkers()
 	b.Mu.Unlock()
-	select {
-	case workerConnected <- true:
-	default:
-	}
+	workerConnected <- true
 	fmt.Println("Worker connected successfully!")
 	return
 }
@@ -161,14 +158,14 @@ func (b *Broker) WorkerDisconnect(req stubs.RemoveRequest, res *stubs.NilRespons
 
 func main() {
 	pAddr := flag.String("port", "9000", "Port to listen on")
-    flag.Parse()
+	flag.Parse()
 	rpc.Register(NewBroker())
 
-    listener, err := net.Listen("tcp", ":" + *pAddr)
+	listener, err := net.Listen("tcp", ":"+*pAddr)
 	if err != nil {
 		fmt.Println("could not listen on port " + *pAddr)
 	}
-    defer listener.Close()
-    go rpc.Accept(listener)
+	defer listener.Close()
+	go rpc.Accept(listener)
 	<-exit
 }
