@@ -33,7 +33,7 @@ func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan boo
 			return
 		case <-ticker.C:
 			world, turn := acknowledgedCells.Get()
-			eventsSender.SendAliveCellsList(turn, stubs.SquashSlice(world))
+			eventsSender.SendAliveCellsList(turn + 1, stubs.SquashSlice(world))
 		}
 	}
 }
