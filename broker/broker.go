@@ -114,10 +114,7 @@ func (b *Broker) ServerQuit(req stubs.NilRequest, res *stubs.NilResponse) (err e
 
 // remove the controller on voluntary request
 func (b *Broker) ControllerQuit(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
-	b.Mu.Lock()
-	b.Controller.Close()
-	b.Mu.Unlock()
-	defer b.removeController()
+	b.removeController()
 	return
 }
 
