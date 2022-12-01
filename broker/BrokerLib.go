@@ -166,7 +166,7 @@ func (b *Broker) singleWorkerGOL(hasReprimed bool, acknowledgedWorkers []int) (c
 	if hasReprimed {
 		// repriming will make the worker empty
 		workReq = stubs.WorkRequest{
-			FlippedCells: stubs.SquashSlice(b.CurrentWorld),
+			FlippedCells: stubs.GetAliveCells(b.CurrentWorld),
 		}
 	} else {
 		// the worker will already have their own state
@@ -207,7 +207,7 @@ func (b *Broker) multiWorkerGOL(hasReprimed bool, acknowledgedWorkers []int) (ch
 
 		if hasReprimed {
 			// reprimed workers will have blank states, so set state
-			workReq.FlippedCells = stubs.SquashSlice(
+			workReq.FlippedCells = stubs.GetAliveCells(
 				b.getSectionSlice(currentWorkerNo, sliceStartIndex),
 			)
 		} else {
@@ -253,28 +253,28 @@ func (b *Broker) getHalos(currentWorker, sliceStartIndex, totalWorkers int) (top
 	workSize := b.workAllocation[currentWorker]
 	if currentWorker == 0 {
 		// this is the first slice
-		topHalo = stubs.SquashSlice(
+		topHalo = stubs.GetAliveCells(
 			[][]byte{b.CurrentWorld[len(b.CurrentWorld)-1]},
 		)
-		bottomHalo = stubs.SquashSlice(
+		bottomHalo = stubs.GetAliveCells(
 			[][]byte{b.CurrentWorld[workSize]},
 		)
 		return
 	}
 	if currentWorker == totalWorkers-1 {
 		// this is the last slice
-		topHalo = stubs.SquashSlice(
+		topHalo = stubs.GetAliveCells(
 			[][]byte{b.CurrentWorld[sliceStartIndex-1]},
 		)
-		bottomHalo = stubs.SquashSlice(
+		bottomHalo = stubs.GetAliveCells(
 			[][]byte{b.CurrentWorld[0]},
 		)
 		return
 	}
-	topHalo = stubs.SquashSlice(
+	topHalo = stubs.GetAliveCells(
 		[][]byte{b.CurrentWorld[sliceStartIndex-1]},
 	)
-	bottomHalo = stubs.SquashSlice(
+	bottomHalo = stubs.GetAliveCells(
 		[][]byte{b.CurrentWorld[sliceStartIndex+workSize]},
 	)
 	return

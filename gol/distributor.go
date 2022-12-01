@@ -32,7 +32,7 @@ func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan boo
 			return
 		case <-ticker.C:
 			world, turn := acknowledgedCells.Get()
-			eventsSender.SendAliveCellsList(turn+1, stubs.SquashSlice(world))
+			eventsSender.SendAliveCellsList(turn+1, stubs.GetAliveCells(world))
 		}
 	}
 }
@@ -178,7 +178,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	eventsSender.SendOutputPGM(world, turn+1)
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-	eventsSender.SendFinalTurn(turn+1, stubs.SquashSlice(world))
+	eventsSender.SendFinalTurn(turn+1, stubs.GetAliveCells(world))
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
