@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/rpc"
 	"strconv"
-	"sync"
 	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
@@ -33,7 +32,7 @@ func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan boo
 			return
 		case <-ticker.C:
 			world, turn := acknowledgedCells.Get()
-			eventsSender.SendAliveCellsList(turn + 1, stubs.SquashSlice(world))
+			eventsSender.SendAliveCellsList(turn+1, stubs.SquashSlice(world))
 		}
 	}
 }
@@ -52,14 +51,12 @@ func kpListener(kp <-chan rune, client *rpc.Client, exit chan bool, c distributo
 			client.Call(stubs.ControllerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
 			eventsSender.SendStateChange(turn, Quitting)
 			// make sure every goroutine dependent on exit is shutdown
-			eventsSender.mu.Lock()
 			for i := 0; i < 5; i++ {
 				select {
 				case exit <- true:
 				default:
 				}
 			}
-			eventsSender.mu.Unlock()
 		case 'k':
 			//kill the distributed system
 			fmt.Println("sent kill call")
@@ -97,7 +94,7 @@ func kpListener(kp <-chan rune, client *rpc.Client, exit chan bool, c distributo
 // distributor distributes the work to the broker via rpc calls
 func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	// provide global info for rpc call handlers to use
-	eventsSender = Sender{C: c, P: p, mu: new(sync.Mutex)}
+	eventsSender = Sender{C: c, P: p}
 
 	// load the initial world
 	cells := eventsSender.GetInitialAliveCells()
@@ -125,7 +122,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	go receiver(exit, isListening, p)
 	<-isListening
 
-	// dial the Broker. This is a hardcoded address
+	// dial the Broker.
 	client, err := rpc.Dial("tcp", p.BrokerAddr)
 	defer client.Close()
 	if err != nil {
