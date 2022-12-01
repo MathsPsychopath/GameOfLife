@@ -7,9 +7,9 @@ import (
 )
 
 type CellsContainer struct {
-	Mu 				*sync.Mutex
-	CurrentWorld 	[][]byte
-	Turn    		int
+	Mu           *sync.Mutex
+	CurrentWorld [][]byte
+	Turn         int
 }
 
 // initialise the container with a mutex lock
@@ -35,6 +35,11 @@ func (c *CellsContainer) UpdateWorld(flippedCells []util.Cell, turn int) {
 		c.CurrentWorld[cell.Y][cell.X] ^= 0xFF
 	}
 	c.Mu.Unlock()
+}
+func (c *CellsContainer) GetAliveCount() (int, int) {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	return len(GetAliveCells(c.CurrentWorld)), c.Turn
 }
 
 func (c *CellsContainer) Get() ([][]byte, int) {

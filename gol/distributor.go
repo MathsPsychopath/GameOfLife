@@ -31,8 +31,8 @@ func aliveCellsTicker(client *rpc.Client, c distributorChannels, exit <-chan boo
 		case <-exit:
 			return
 		case <-ticker.C:
-			world, turn := acknowledgedCells.Get()
-			eventsSender.SendAliveCellsList(turn+1, stubs.GetAliveCells(world))
+			aliveCellsCount, turn := acknowledgedCells.GetAliveCount()
+			eventsSender.SendAliveCellsList(turn, aliveCellsCount)
 		}
 	}
 }

@@ -97,7 +97,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 		// consolidate and apply changes
 		b.applyChanges(flippedCells)
 		// rpc controller with flipped cells
-		req := stubs.PushStateRequest{FlippedCells: flippedCells, Turn: turn}
+		req := stubs.PushStateRequest{FlippedCells: flippedCells, Turn: turn + 1}
 		b.Controller.Call(stubs.PushState, req, new(stubs.NilResponse))
 		b.Mu.Unlock()
 	}

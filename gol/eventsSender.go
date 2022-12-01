@@ -15,8 +15,9 @@ func (s *Sender) SendStateChange(turn int, state State) {
 	s.C.events <- StateChange{CompletedTurns: turn, NewState: state}
 }
 
-func (s *Sender) SendAliveCellsList(turn int, cells []util.Cell) {
-	s.C.events <- AliveCellsCount{CompletedTurns: turn, CellsCount: len(cells)}
+func (s *Sender) SendAliveCellsList(turn int, cellsCount int) {
+	s.C.events <- AliveCellsCount{CompletedTurns: turn, CellsCount: cellsCount}
+
 }
 
 func (s *Sender) SendFlippedCellList(turn int, cells ...util.Cell) {
