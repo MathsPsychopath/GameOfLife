@@ -197,7 +197,7 @@ func (b *Broker) multiWorkerGOL(hasReprimed bool) (flippedCells []util.Cell, suc
 	for id := range b.workerIds {
 		// assign halos to work request
 		workReq := stubs.WorkRequest{}
-		workReq.BottomHalo, workReq.TopHalo = b.getHalos(id)
+		workReq.TopHalo, workReq.BottomHalo = b.getHalos(id)
 
 		if hasReprimed {
 			// reprimed workers will have blank states, so set state
@@ -244,20 +244,11 @@ func (b *Broker) multiWorkerGOL(hasReprimed bool) (flippedCells []util.Cell, suc
 // returns the top and bottom halos for a given worker
 func (b *Broker) getHalos(workerId int) (topHalo, bottomHalo []byte) {
 
-	workSize := b.workAllocation[workerId]
-	if b.workerRowOffsets[workerId] == 0 { // if first slice
-		topHalo = b.CurrentWorld[len(b.CurrentWorld)-1]
-		bottomHalo = b.CurrentWorld[workSize]
-		return
-	}
-	if b.workerRowOffsets[workerId]+b.workAllocation[workerId] == b.Params.ImageHeight { // if last slice
-		topHalo = b.CurrentWorld[b.workerRowOffsets[workerId]-1]
-		bottomHalo = b.CurrentWorld[0]
-		return
-	}
-	// if any slice in between
-	topHalo = b.CurrentWorld[b.workerRowOffsets[workerId]-1]
-	bottomHalo = b.CurrentWorld[b.workerRowOffsets[workerId]+workSize]
+	topHaloIndex := (b.workerRowOffsets[workerId] - 1) & (b.Params.ImageHeight - 1)
+	botHaloIndex := (b.workerRowOffsets[workerId] + b.workAllocation[workerId]) & (b.Params.ImageHeight - 1)
+	fmt.Printf("tophaloindex: %d bothaloindex: %d\n", topHaloIndex, botHaloIndex)
+	topHalo = b.CurrentWorld[topHaloIndex]
+	bottomHalo = b.CurrentWorld[botHaloIndex]
 	return
 }
 

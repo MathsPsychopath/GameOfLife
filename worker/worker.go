@@ -29,7 +29,6 @@ func (w *Worker) EvolveSlice(req stubs.WorkRequest, res *stubs.WorkResponse) (er
 	// multiworker GOL noprime  = halos    + no body
 	if req.FlippedCells != nil {
 		// the worker has been reprimed, so its internal state is empty
-		fmt.Println("flippedCells: ", req.FlippedCells)
 		w.container.UpdateWorldAndTurn(req.FlippedCells, 0) // TODO: change so that worker keeps track of own turn
 	}
 

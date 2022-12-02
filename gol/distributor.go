@@ -175,7 +175,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	world, turn := acknowledgedCells.Get()
 
 	// Output the final image
-	eventsSender.SendOutputPGM(world, turn+1)
+	eventsSender.SendOutputPGM(world, turn)
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	eventsSender.SendFinalTurn(turn+1, stubs.GetAliveCells(world))
@@ -193,8 +193,10 @@ type Controller struct{}
 // This method will be called if the Broker has a calculated new state
 // for the user to view in SDL window
 func (c *Controller) PushState(req stubs.PushStateRequest, res *stubs.NilResponse) (err error) {
+	// util.VisualiseSquare(acknowledgedCells.CurrentWorld, len(acknowledgedCells.CurrentWorld), len(acknowledgedCells.CurrentWorld))
 	acknowledgedCells.UpdateWorldAndTurn(req.FlippedCells, req.Turn)
-
+	// util.VisualiseSquare(acknowledgedCells.CurrentWorld, len(acknowledgedCells.CurrentWorld), len(acknowledgedCells.CurrentWorld))
+	// eventsSender.SendOutputPGM(acknowledgedCells.CurrentWorld, req.Turn) //DEBUG
 	eventsSender.SendFlippedCellList(req.Turn, req.FlippedCells...)
 	eventsSender.SendTurnComplete(req.Turn)
 	return

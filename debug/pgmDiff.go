@@ -10,10 +10,12 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-func writePgmImage(world [][]byte, filename string, imageSize int) {
-	_ = os.Mkdir("out", os.ModePerm)
+type Image struct {
+	imageSize int
+	turns     int
+}
 
-	// Request a filename from the distributor.
+func writePgmImage(world [][]byte, filename string, imageSize int) {
 
 	file, ioError := os.Create(filename)
 	util.Check(ioError)
@@ -97,16 +99,30 @@ func readPgmImage(filename string, imageSize int) []byte {
 	image := []byte(fields[4])
 	return image
 }
+func getFileName(image Image) string {
+	return fmt.Sprintf("%dx%dx%d", image.imageSize, image.imageSize, image.turns)
+}
+
+func compare(image1Data, image2Data Image) {
+	filename := getFileName(image1Data)
+	fmt.Printf("filename: %s\n", filename+".pgm")
+	filenameDir := "../out/" + filename + ".pgm"
+	image1 := readPgmImage(filenameDir, image1Data.imageSize)
+	filename = getFileName(image2Data)
+	filenameDir = "../check/images/" + filename + ".pgm"
+	image2 := readPgmImage(filenameDir, image1Data.imageSize)
+	diff := getDiff(image1, image2)
+	matrix := getMatrix(diff, image1Data.imageSize)
+	filenameDir = "../out/diff/" + getFileName(image1Data) + "___" + getFileName(image2Data) + "_diff.pgm"
+	writePgmImage(matrix, filenameDir, image1Data.imageSize)
+	fmt.Printf("done\n")
+}
 
 func main() {
-	imageSize := 512
-	filename := "../out/512x512x1.pgm"
-	image1 := readPgmImage(filename, imageSize)
-	filename = "../check/images/512x512x1.pgm"
-	image2 := readPgmImage(filename, imageSize)
-	diff := getDiff(image1, image2)
-	matrix := getMatrix(diff, imageSize)
-	filename = "../out/512x512x1_diff.pgm"
-	writePgmImage(matrix, filename, imageSize)
-	fmt.Printf("done\n")
+	turns := 4
+	imageSize := 64
+	offset := 0
+	for i := 1; i < turns; i++ {
+		compare(Image{imageSize: imageSize, turns: i}, Image{imageSize: imageSize, turns: i + offset})
+	}
 }

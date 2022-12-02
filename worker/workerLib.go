@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -49,27 +47,13 @@ func (w *Worker) getNeighbourCount(row, column int, worldWithHalos [][]byte) byt
 	return alive
 }
 
-// joins slice with Halo
-func (w *Worker) constructWorld(topHalo, botHalo []byte) [][]byte {
-	if topHalo == nil {
-		fmt.Println("running single worker GOL")
-		topHalo = w.container.CurrentWorld[len(w.container.CurrentWorld)-1] //topHalo to bottom row
-		botHalo = w.container.CurrentWorld[0]                               //botHalo to top row
-	} else {
-		fmt.Println("running multi-worker GOL") //else statement only for debugging purposes
-	}
-	output := [][]byte{topHalo}
-	output = append(output, w.container.CurrentWorld...)
-	output = append(output, botHalo)
-	return output
-}
-
 func (w *Worker) evolve(outputWorldSlice [][]byte, topHalo, botHalo []byte) []util.Cell {
 	w.container.Mu.Lock()
 	defer w.container.Mu.Unlock()
 	flippedCells := []util.Cell{}
-	worldSlice := w.constructWorld(topHalo, botHalo)
-
+	worldSlice := [][]byte{topHalo}
+	worldSlice = append(worldSlice, w.container.CurrentWorld...)
+	worldSlice = append(worldSlice, botHalo)
 	// i starts at 1 and ends at len-1 because we are not iterating through halo-rows
 	for i := 1; i < len(worldSlice)-1; i++ {
 		for j, cell := range worldSlice[i] {
