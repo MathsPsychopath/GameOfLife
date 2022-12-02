@@ -132,21 +132,6 @@ func generatePGM(p Params, c distributorChannels, world [][]byte, turns int) {
 	}
 }
 
-// start worker threads to work on specific sections given params
-func initialiseWorker(world [][]byte, outputChannel chan HorSlice, p Params, i int, c distributorChannels, turn int) {
-	// i is current thread
-	segmentSize := p.ImageHeight / p.Threads
-	startRow := i * segmentSize
-	var endRow int
-	if i == p.Threads-1 {
-		endRow = p.ImageHeight
-	} else {
-		endRow = (i + 1) * segmentSize
-	}
-	slice := HorSlice{world, startRow, endRow}
-	go worker(slice, p, outputChannel, c, turn)
-}
-
 // send the AliveCellsCount event
 func checkTicker(ticker *time.Ticker, world [][]byte, turn int, c distributorChannels) {
 	select {
@@ -235,6 +220,21 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	var waitgroup sync.WaitGroup
 	run := true
 
+	// pre-calculate work distribution
+	segment := p.ImageHeight / p.Threads
+	remainder := p.ImageHeight - (segment * p.Threads)
+	workSizes := []HorSlice{}
+	workerStartRow := 0
+	for i := 0; i < p.Threads; i++ {
+		work := HorSlice{grid: nil, startRow: workerStartRow, endRow: workerStartRow + segment}
+		if remainder > 0 {
+			work.endRow += 1
+			remainder--
+		}
+		workSizes = append(workSizes, work)
+		workerStartRow = work.endRow
+	}
+
 	for ; turn < p.Turns && run; turn++ {
 		select {
 		case turnSender <- turn:
@@ -248,7 +248,9 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 
 		// Initialise the worker threads
 		for tr := 0; tr < p.Threads; tr++ {
-			initialiseWorker(world, workerOutputChannel, p, tr, c, turn)
+			slice := workSizes[tr]
+			slice.grid = world
+			go worker(slice, p, workerOutputChannel, c, turn)
 		}
 		for tr := 0; tr < p.Threads; tr++ {
 			newSlice := <-workerOutputChannel
