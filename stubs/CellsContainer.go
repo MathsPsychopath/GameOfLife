@@ -20,19 +20,19 @@ func NewCellsContainer() *CellsContainer {
 }
 
 // set the container to point to some initial state
-func (c *CellsContainer) SetWorld(world [][]byte) {
+func (c *CellsContainer) UpdateWorld(world [][]byte) {
 	c.Mu.Lock()
 	c.CurrentWorld = world
 	c.Mu.Unlock()
 }
 
 // update the current world with the flipped cells
-func (c *CellsContainer) UpdateWorld(flippedCells []util.Cell, turn int) {
+func (c *CellsContainer) UpdateWorldAndTurn(flippedCells []util.Cell, turn int) {
 	c.Mu.Lock()
 	c.Turn = turn
 	for _, cell := range flippedCells {
 		// inversion faster without branching
-		c.CurrentWorld[cell.Y][cell.X] ^= 0xFF
+s		c.CurrentWorld[cell.Y][cell.X] ^= 0xFF
 	}
 	c.Mu.Unlock()
 }
