@@ -20,14 +20,14 @@ func NewCellsContainer() *CellsContainer {
 }
 
 // set the container to point to some initial state
-func (c *CellsContainer) InitialiseWorld(world [][]byte) {
+func (c *CellsContainer) UpdateWorld(world [][]byte) {
 	c.Mu.Lock()
 	c.CurrentWorld = world
 	c.Mu.Unlock()
 }
 
 // update the current world with the flipped cells
-func (c *CellsContainer) UpdateWorld(flippedCells []util.Cell, turn int) {
+func (c *CellsContainer) UpdateWorldAndTurn(flippedCells []util.Cell, turn int) {
 	c.Mu.Lock()
 	c.Turn = turn
 	for _, cell := range flippedCells {
