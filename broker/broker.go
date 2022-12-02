@@ -73,12 +73,11 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 		if len(b.Workers) == 1 {
 			// do single worker GOL
 			flippedCells, success, faultyWorkerIds = b.singleWorkerGOL(hasReprimed, acknowledgedWorkers)
-		} else {
-			if len(b.Workers) != 0 {
-				// slice the world and distribute it to workers
-				flippedCells, success, faultyWorkerIds = b.multiWorkerGOL(hasReprimed, acknowledgedWorkers)
-			}
+		} else if len(b.Workers) != 0 {
+			// slice the world and distribute it to workers
+			flippedCells, success, faultyWorkerIds = b.multiWorkerGOL(hasReprimed, acknowledgedWorkers)
 		}
+
 		b.Mu.Unlock()
 
 		if !success {

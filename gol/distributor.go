@@ -109,7 +109,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	eventsSender.SendTurnComplete(0)
 
 	// store the initial world in memory
-	acknowledgedCells.InitialiseWorld(
+	acknowledgedCells.SetWorld(
 		stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth),
 	)
 

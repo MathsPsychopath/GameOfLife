@@ -20,7 +20,7 @@ func NewCellsContainer() *CellsContainer {
 }
 
 // set the container to point to some initial state
-func (c *CellsContainer) InitialiseWorld(world [][]byte) {
+func (c *CellsContainer) SetWorld(world [][]byte) {
 	c.Mu.Lock()
 	c.CurrentWorld = world
 	c.Mu.Unlock()
