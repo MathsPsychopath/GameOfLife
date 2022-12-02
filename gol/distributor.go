@@ -49,11 +49,26 @@ func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 		{X: 1, Y: 1},
 	}
 	for _, offset := range offsets {
-		actualRow := (row + offset.X) & (p.ImageHeight - 1)
-		actualCol := (column + offset.Y) & (p.ImageWidth - 1)
+		// actualRow := (row + offset.X) & (p.ImageHeight - 1)
+		// actualCol := (column + offset.Y) & (p.ImageWidth - 1)
+		actualRow := row + offset.Y
+		if actualRow == p.ImageHeight {
+			actualRow = 0
+		}
+		if actualRow == -1 {
+			actualRow = p.ImageHeight - 1
+		}
+		actualCol := column + offset.Y 
+		if actualCol == p.ImageWidth {
+			actualCol = 0
+		}
+		if actualCol == -1 {
+			actualCol = p.ImageWidth - 1
+		}
 		if world[actualRow][actualCol] == 0xFF {
 			alive++
 		}
+
 	}
 	return alive
 }
