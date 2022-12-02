@@ -36,7 +36,7 @@ func createNewSlice(rows, columns int) [][]byte {
 
 // count the number of neighbours that a particular cell has in the world
 func getNeighbourCount(world [][]byte, row, column int, p Params) int {
-	alive := 0
+	var alive byte = 0
 	// positions of neighbouring cells relative to current cell
 	offsets := []util.Cell{
 		{X: -1, Y: -1},
@@ -49,19 +49,11 @@ func getNeighbourCount(world [][]byte, row, column int, p Params) int {
 		{X: 1, Y: 1},
 	}
 	for _, offset := range offsets {
-		actualRow := (row + offset.X) % p.ImageHeight
-		if actualRow < 0 {
-			actualRow = p.ImageHeight + actualRow
-		}
-		actualCol := (column + offset.Y) % p.ImageWidth
-		if actualCol < 0 {
-			actualCol = p.ImageWidth + actualCol
-		}
-		if world[actualRow][actualCol] == 0xFF {
-			alive++
-		}
+		actualRow := (row + offset.X) & (p.ImageHeight - 1)
+		actualCol := (column + offset.Y) & (p.ImageWidth - 1)
+		alive += (world[actualRow][actualCol] >> 7)
 	}
-	return alive
+	return int(alive)
 }
 
 // apply GOL rules and return the result for given cell
