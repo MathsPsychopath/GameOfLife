@@ -170,7 +170,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 
 	// exit the broker
 	client.Call(stubs.ControllerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
-
+	client.Close()
 	// Get the final state of the world
 	world, turn := acknowledgedCells.Get()
 

@@ -52,7 +52,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 	for turn := 0; turn < req.P.Turns; turn++ {
 		fmt.Printf("turn: %d workers: %d\n", turn, len(b.workerIds))
 		b.Pause.Wait()
-		hasReprimed := false || turn == 0
+		hasReprimed := turn == 0
 		// check for any additions or disconnects
 		if len(b.Workers) == 0 {
 			fmt.Println("Waiting for workers to connect")

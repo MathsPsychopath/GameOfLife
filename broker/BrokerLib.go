@@ -157,7 +157,7 @@ func (b *Broker) isSameWorkers(ids []int) bool {
 }
 
 // executes 1 iteration of single worker GOL
-func (b *Broker) singleWorkerGOL(hasReprimed bool) (changed []util.Cell, success bool, faultyWorkerIds []int) {
+func (b *Broker) singleWorkerGOL(hasReprimed bool) (flippedCells []util.Cell, success bool, faultyWorkerIds []int) {
 	var workReq stubs.WorkRequest
 	if hasReprimed {
 		// repriming will make the worker empty
@@ -175,7 +175,7 @@ func (b *Broker) singleWorkerGOL(hasReprimed bool) (changed []util.Cell, success
 		faultyWorkerIds = append(faultyWorkerIds, b.workerIds[0])
 		return
 	}
-	changed = workRes.FlippedCells
+	flippedCells = workRes.FlippedCells
 	return
 }
 
@@ -188,17 +188,16 @@ func (b *Broker) getSectionSlice(workerId int) [][]byte {
 }
 
 // executes 1 iteration of Multi-worker GOL
-func (b *Broker) multiWorkerGOL(hasReprimed bool) (changed []util.Cell, success bool, faultyWorkerIds []int) {
+func (b *Broker) multiWorkerGOL(hasReprimed bool) (flippedCells []util.Cell, success bool, faultyWorkerIds []int) {
 	// multiple workers => halos
 	var waitgroup sync.WaitGroup
 	success = true
-	changed = []util.Cell{}
-	serialise := make(chan util.Cell, 10000)
+	flippedCells = []util.Cell{}
+	flippedCellChannel := make(chan util.Cell, 10000)
 	for id := range b.workerIds {
 		// assign halos to work request
 		workReq := stubs.WorkRequest{}
-		workReq.BottomHalo, workReq.TopHalo =
-			b.getHalos(id)
+		workReq.BottomHalo, workReq.TopHalo = b.getHalos(id)
 
 		if hasReprimed {
 			// reprimed workers will have blank states, so set state
@@ -222,7 +221,7 @@ func (b *Broker) multiWorkerGOL(hasReprimed bool) (changed []util.Cell, success 
 				// we need to merge the flipped cells in different goroutines
 				// so send into serialising channel
 				for _, cell := range workRes.FlippedCells {
-					serialise <- cell
+					flippedCellChannel <- cell
 				}
 			}
 			// if one fails, then discard the whole batch
@@ -233,11 +232,11 @@ func (b *Broker) multiWorkerGOL(hasReprimed bool) (changed []util.Cell, success 
 	// when all goroutines have finished, this will unblock the "for range chan"
 	go func() {
 		waitgroup.Wait()
-		close(serialise)
+		close(flippedCellChannel)
 	}()
 	// this receives the cells from the goroutines
-	for cell := range serialise {
-		changed = append(changed, cell)
+	for cell := range flippedCellChannel {
+		flippedCells = append(flippedCells, cell)
 	}
 	return
 }
