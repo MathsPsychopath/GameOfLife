@@ -1,6 +1,8 @@
 package stubs
 
-import "uk.ac.bris.cs/gameoflife/util"
+import (
+	"uk.ac.bris.cs/gameoflife/util"
+)
 
 /*
  * This is a library intended to convert slices into a communication friendly form.
@@ -33,7 +35,7 @@ func ConstructWorld(cells []util.Cell, height, width int) [][]byte {
 	return world
 }
 
-// expand a halo into full form
+// converts Cell array to byte array
 func ConstructHalo(cells []util.Cell, width int) []byte {
 	halo := make([]byte, width)
 	for _, cell := range cells {
@@ -51,4 +53,19 @@ func SquashHalo(halo []byte, row int) []util.Cell {
 		}
 	}
 	return cells
+}
+
+func RemoveSliceElement(s []int, val int) []int {
+	i := findValue(s, val)
+	s[i] = s[len(s)-1]
+	return s[:len(s)-1]
+}
+
+func findValue(arr []int, element int) int {
+	for i, val := range arr {
+		if val == element {
+			return i
+		}
+	}
+	return -1
 }

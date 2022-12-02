@@ -109,7 +109,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	eventsSender.SendTurnComplete(0)
 
 	// store the initial world in memory
-	acknowledgedCells.SetWorld(
+	acknowledgedCells.UpdateWorld(
 		stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth),
 	)
 
@@ -193,7 +193,7 @@ type Controller struct{}
 // This method will be called if the Broker has a calculated new state
 // for the user to view in SDL window
 func (c *Controller) PushState(req stubs.PushStateRequest, res *stubs.NilResponse) (err error) {
-	acknowledgedCells.UpdateWorld(req.FlippedCells, req.Turn)
+	acknowledgedCells.UpdateWorldAndTurn(req.FlippedCells, req.Turn)
 
 	eventsSender.SendFlippedCellList(req.Turn, req.FlippedCells...)
 	eventsSender.SendTurnComplete(req.Turn)

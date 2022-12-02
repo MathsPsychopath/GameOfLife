@@ -32,7 +32,7 @@ func (c *CellsContainer) UpdateWorldAndTurn(flippedCells []util.Cell, turn int) 
 	c.Turn = turn
 	for _, cell := range flippedCells {
 		// inversion faster without branching
-s		c.CurrentWorld[cell.Y][cell.X] ^= 0xFF
+		c.CurrentWorld[cell.Y][cell.X] ^= 0xFF
 	}
 	c.Mu.Unlock()
 }

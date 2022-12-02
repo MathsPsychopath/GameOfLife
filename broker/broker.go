@@ -34,7 +34,7 @@ func (b *Broker) ControllerConnect(req stubs.ConnectRequest, res *stubs.NilRespo
 func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (err error) {
 	// define state to evolve from
 	b.setParams(req.P)
-	if req.P.Turns == 0 {
+	if req.P.Turns == 0 { //if no turns to be executed, just send back initial state
 		b.Mu.Lock()
 		b.Controller.Call(stubs.PushState, stubs.PushStateRequest{Turn: 0, FlippedCells: req.InitialAliveCells}, new(stubs.NilResponse))
 		b.Mu.Unlock()
@@ -49,10 +49,8 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 		fmt.Println("Worker has connected!")
 	}
 	b.primeWorkers() // this is called serially so no mutex
-	acknowledgedWorkers := getWorkerKeys(b.Workers)
 	for turn := 0; turn < req.P.Turns; turn++ {
-		fmt.Println("worker map: ", b.Workers)
-		fmt.Println("acknowledged workers: ", acknowledgedWorkers)
+		fmt.Printf("turn: %d workers: %d\n", turn, len(b.workerIds))
 		b.Pause.Wait()
 		hasReprimed := false || turn == 0
 		// check for any additions or disconnects
@@ -61,9 +59,9 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 			<-workerConnected
 			fmt.Println("Worker has connected!")
 		}
-		if !b.isSameWorkers(acknowledgedWorkers) {
+		if !b.isSameWorkers(b.workerIds) {
 			fmt.Println("workers sequence has changed")
-			hasReprimed, acknowledgedWorkers = b.handleWorkerChanges()
+			hasReprimed = true
 		}
 
 		var flippedCells []util.Cell
@@ -72,10 +70,10 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 		b.Mu.Lock()
 		if len(b.Workers) == 1 {
 			// do single worker GOL
-			flippedCells, success, faultyWorkerIds = b.singleWorkerGOL(hasReprimed, acknowledgedWorkers)
+			flippedCells, success, faultyWorkerIds = b.singleWorkerGOL(hasReprimed)
 		} else if len(b.Workers) != 0 {
 			// slice the world and distribute it to workers
-			flippedCells, success, faultyWorkerIds = b.multiWorkerGOL(hasReprimed, acknowledgedWorkers)
+			flippedCells, success, faultyWorkerIds = b.multiWorkerGOL(hasReprimed)
 		}
 
 		b.Mu.Unlock()
@@ -138,9 +136,7 @@ func (b *Broker) WorkerConnect(req stubs.ConnectRequest, res *stubs.ConnectRespo
 	}
 	res.Id = b.NextID
 	b.addWorker(client)
-	b.Mu.Lock()
 	b.primeWorkers()
-	b.Mu.Unlock()
 	workerConnected <- true
 	fmt.Println("Worker connected successfully!")
 	return
