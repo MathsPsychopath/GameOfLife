@@ -14,6 +14,24 @@ func main() {
 	runtime.LockOSThread()
 	var params gol.Params
 
+	flag.StringVar(
+		&params.ListenIP,
+		"listen",
+		"127.0.0.1",
+		"Specify the IP address of the distributor (this machine). Defaults to 127.0.0.1.")
+
+	flag.IntVar(
+		&params.ListenPort,
+		"p",
+		8090,
+		"Specify the port to listen on. Defaults to 8090.")
+
+	flag.StringVar(
+		&params.BrokerAddr,
+		"broker",
+		"127.0.0.1:9000",
+		"Specify the socket address of the broker. Defaults to 127.0.0.1:9000.")
+
 	flag.IntVar(
 		&params.Threads,
 		"t",
