@@ -56,16 +56,22 @@ func SquashHalo(halo []byte, row int) []util.Cell {
 }
 
 func RemoveSliceElement(s []int, val int) []int {
-	i := findValue(s, val)
+	i := FindValue(s, val)
 	s[i] = s[len(s)-1]
 	return s[:len(s)-1]
 }
 
-func findValue(arr []int, element int) int {
+func FindValue(arr []int, element int) int {
 	for i, val := range arr {
 		if val == element {
 			return i
 		}
 	}
 	return -1
+}
+
+func FlushHaloChan(c chan []byte) {
+	for len(c) != 0 {
+		<-c
+	}
 }

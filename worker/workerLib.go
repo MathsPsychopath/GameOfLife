@@ -1,6 +1,9 @@
 package main
 
 import (
+	"net/rpc"
+
+	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -68,4 +71,21 @@ func (w *Worker) evolve(outputWorldSlice [][]byte, topHalo, botHalo []byte) []ut
 		}
 	}
 	return flippedCells
+}
+
+func (w *Worker) pushHalos(topDone, botDone chan *rpc.Call) {
+	//todo make below into 2 go routines
+	topHaloPushReq := stubs.PushHaloRequest{ //this is the topHalo of the adjacent worker (beneath this one)
+		Halo:  w.container.CurrentWorld[w.height-1], //last row
+		IsTop: true,
+	}
+	<-topDone //make sure that previous pushHalo was received
+	w.topWorker.Go(stubs.PushHalo, topHaloPushReq, stubs.NilResponse{}, topDone)
+
+	botHaloPushReq := stubs.PushHaloRequest{ //this is the botHalo of the adjacent worker (above this one)
+		Halo:  w.container.CurrentWorld[0], //first row
+		IsTop: false,
+	}
+	<-botDone //make sure that previous pushHalo was received by adjacent worker
+	w.botWorker.Go(stubs.PushHalo, botHaloPushReq, stubs.NilResponse{}, botDone)
 }

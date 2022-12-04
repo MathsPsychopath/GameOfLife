@@ -7,7 +7,9 @@ import (
 	"net/rpc"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
 )
@@ -20,36 +22,95 @@ type Worker struct {
 	id        int
 	width     int
 	height    int
+	topWorker *rpc.Client
+	botWorker *rpc.Client
+	broker    *rpc.Client
+	reprime   bool
+	topHalo   chan []byte
+	botHalo   chan []byte
+	exit      bool
 }
 
-func (w *Worker) EvolveSlice(req stubs.WorkRequest, res *stubs.WorkResponse) (err error) {
-	// 1    worker GOL reprimed = no halos + body
-	// multiworker GOL reprimed = halos    + body
-	// 1    worker GOL noprime  = no halos + no body
-	// multiworker GOL noprime  = halos    + no body
-	if req.FlippedCells != nil {
-		// the worker has been reprimed, so its internal state is empty
-		w.container.UpdateWorldAndTurn(req.FlippedCells, 0) // TODO: change so that worker keeps track of own turn
+func (w *Worker) EvolveSlice(req stubs.WorkRequest, res *stubs.NilResponse) (err error) {
+	// the worker has been reprimed, so its internal state is empty
+	w.container.UpdateWorldAndTurn(req.FlippedCells, 0)
+	// TODO: change so that worker keeps track of own turn
+	topDone := make(chan *rpc.Call, 1)
+	topDone <- new(rpc.Call)
+	botDone := make(chan *rpc.Call, 1)
+	botDone <- new(rpc.Call)
+	brokerDone := make(chan *rpc.Call, 1)
+	wg := new(sync.WaitGroup)
+	w.reprime = false
+	for i := req.StartTurn; i <= req.Turns || req.Turns == -1; i++ { //if -1 that means forever
+		fmt.Printf("processing turn: %d of turns %d\n", i, req.Turns)
+		if w.reprime { //w.reprime comes from a pushState
+			w.reprime = false
+			return
+		}
+		// send Halo to adjacent workers
+		if !req.IsSingleWorker {
+			w.pushHalos(topDone, botDone) //maybe check if they have been received before send next?
+		}
+		var evolvedSlice [][]byte = createNewSlice(w.height, w.width) // TODO try move this outside of for loop and see if it still works
+		// wait for Halo input
+		var topHalo []byte
+		var botHalo []byte
+		if req.IsSingleWorker { //if single worker
+			topHalo = w.container.CurrentWorld[w.height-1] //set to last row
+			botHalo = w.container.CurrentWorld[0]          //set to first row
+		} else { //if more than 1 worker
+			topHalo = <-w.topHalo
+			botHalo = <-w.botHalo
+		}
+		// perform iteration
+		flipped := w.evolve(evolvedSlice, topHalo, botHalo)
+		// updated world in worker api
+		w.container.UpdateWorld(evolvedSlice)
+
+		// TODO pushFLippedCells to broker
+		brokerReq := stubs.BrokerPushStateRequest{
+			FlippedCells: flipped,
+			Turn:         i,
+		}
+		w.broker.Go(stubs.BrokerPushState, brokerReq, new(stubs.NilResponse), brokerDone)
+		wg.Add(1)
+		go func() {
+			<-brokerDone
+			wg.Done()
+		}()
 	}
-
-	var evolvedSlice [][]byte = createNewSlice(w.height, w.width)
-	// perform iteration
-	flipped := w.evolve(evolvedSlice, req.TopHalo, req.BottomHalo)
-	// updated world in worker api
-	w.container.UpdateWorld(evolvedSlice)
-	// add flipped cells to response (sent to broker)
-	res.FlippedCells = flipped
+	wg.Wait() //wait until all flippedCells have been sent
 	return
-
 }
 
+func dialWorker(ip string) *rpc.Client {
+	client, dialError := rpc.Dial("tcp", string(ip))
+	if dialError != nil {
+		fmt.Errorf("broker > could not dial IP " + string(ip))
+	}
+	return client
+}
 func (w *Worker) InitialiseWorker(req stubs.InitWorkerRequest, res *stubs.NilResponse) (err error) {
 	// if using bit masking, then set it to height - 1, width - 1
+	if !req.FirstTime {
+		stubs.FlushHaloChan(w.topHalo)
+		stubs.FlushHaloChan(w.botHalo)
+		if w.topWorker != nil && w.botWorker != nil {
+			w.topWorker.Close()
+			w.botWorker.Close()
+		}
+	}
 	w.width = req.Width
 	w.height = req.Height
 	fmt.Printf("Worker primed with height: %d & width: %d\n", w.height, w.width)
 	w.container.UpdateWorld(createNewSlice(w.height, w.width))
 	w.rowOffset = req.RowOffset
+	if req.TopWorkerIP != "" {
+		w.topWorker = dialWorker(req.TopWorkerIP)
+		w.botWorker = dialWorker(req.BotWorkerIP)
+	}
+	w.reprime = true
 	return
 }
 
@@ -57,6 +118,16 @@ func (w *Worker) InitialiseWorker(req stubs.InitWorkerRequest, res *stubs.NilRes
 func (w *Worker) Shutdown(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
 	// programmatic Ctrl-C
 	defer func() { c <- syscall.SIGINT }()
+	w.exit = true
+	return
+}
+
+func (w *Worker) PushHalo(req stubs.PushHaloRequest, res *stubs.NilResponse) (err error) {
+	if req.IsTop {
+		w.topHalo <- req.Halo
+	} else {
+		w.botHalo <- req.Halo
+	}
 	return
 }
 
@@ -65,9 +136,14 @@ func main() {
 	pAddr := flag.String("port", "9010", "Port to listen on")
 	flag.Parse()
 
+	// initalize Worker
+	worker := Worker{
+		container: *stubs.NewCellsContainer(),
+		topHalo:   make(chan []byte),
+		botHalo:   make(chan []byte),
+	}
 	// listen for work
 	listener, err := net.Listen("tcp", ":"+*pAddr)
-	worker := Worker{container: *stubs.NewCellsContainer()}
 	rpc.Register(&worker)
 	if err != nil {
 		fmt.Println(err)
@@ -76,17 +152,26 @@ func main() {
 	go rpc.Accept(listener)
 
 	// connect to broker
-	client, _ := rpc.Dial("tcp", *bAddr)
+	broker, _ := rpc.Dial("tcp", *bAddr)
+	worker.broker = broker
 	res := new(stubs.ConnectResponse)
 	req := stubs.ConnectRequest{
 		IP: stubs.IPAddress("127.0.0.1:" + *pAddr),
 	}
-	client.Call(stubs.WorkerConnect, req, res)
+	broker.Call(stubs.WorkerConnect, req, res)
 	worker.id = res.Id
 
 	// detect Ctrl-C
 	c = make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
-	<-c
-	client.Call(stubs.WorkerDisconnect, stubs.RemoveRequest{Id: worker.id}, new(stubs.NilResponse))
+
+	for !worker.exit {
+		select {
+		case <-c:
+			broker.Call(stubs.WorkerDisconnect, stubs.RemoveRequest{Id: worker.id}, new(stubs.NilResponse))
+			worker.exit = true
+		default:
+			time.Sleep(time.Second)
+		}
+	}
 }

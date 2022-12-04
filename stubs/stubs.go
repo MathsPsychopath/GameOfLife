@@ -86,6 +86,10 @@ var WorkerDisconnect = "Broker.WorkerDisconnect"
 // req RemoveRequest, sends NilResponse
 // client must send the id of itself
 
+var PushHalo = "Worker.PushHalo"
+
+var BrokerPushState = "Broker.PushState"
+
 type IPAddress string
 
 // No information needed request
@@ -136,19 +140,33 @@ type PushStateRequest struct {
 // This request sends the preliminary information to initialise the worker
 type InitWorkerRequest struct {
 	RowOffset   int //number of rows from row 0 (top row)
-	WorkerIndex int
 	Height      int
 	Width       int
+	TopWorkerIP string
+	BotWorkerIP string
+	FirstTime   bool
 }
 
 // This request sends the halos and slice of world to work on
 type WorkRequest struct {
-	FlippedCells []util.Cell
-	TopHalo      []byte
-	BottomHalo   []byte
+	FlippedCells   []util.Cell
+	Turns          int
+	StartTurn      int
+	IsSingleWorker bool
 }
 
 // This response is sent by workers when work done
 type WorkResponse struct {
 	FlippedCells []util.Cell
+}
+
+type PushHaloRequest struct {
+	Halo  []byte
+	IsTop bool
+}
+
+type BrokerPushStateRequest struct {
+	FlippedCells []util.Cell
+	Turn         int
+	WorkerId     int
 }

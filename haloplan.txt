@@ -1,0 +1,21 @@
+startGol:
+while notFinished
+primeWorkers
+forEachWorker:
+	sendParams to start execution
+
+    
+wait() until final 
+
+workerFailCheck:
+//ran as goroutine
+if workerFails (no response after 1 sec):
+	remove worker from workers map
+	reprime all workers
+
+CollectState:
+//ran as a goroutine
+collects state 
+push state to distributor
+b.applyChanges(flippedCells)
+b.Controller.Call(stubs.PushState, req, new(stubs.NilResponse))
