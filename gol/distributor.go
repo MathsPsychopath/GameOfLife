@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"uk.ac.bris.cs/gameoflife/channels"
 	util "uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -14,6 +15,43 @@ type HorSlice struct {
 	grid     [][]byte
 	startRow int
 	endRow   int
+}
+
+// declare channel for HSlice on only used in this package
+
+type HSliceChannel struct {
+	value    *HorSlice
+	cond     *sync.Cond
+}
+
+func NewHSliceChannel() *HSliceChannel {
+	m := new(sync.Mutex)
+	return &HSliceChannel{value: nil, cond: sync.NewCond(m)}
+}
+
+func (c *HSliceChannel) Send(value HorSlice, block bool) {
+	c.cond.L.Lock()
+	for c.value != nil {
+		if !block {
+			c.cond.L.Unlock()
+			return
+		}
+		c.cond.Wait()
+	}
+	c.value = &value
+	c.cond.Broadcast()
+	c.cond.L.Unlock()
+}
+
+func (c *HSliceChannel) Receive() (v HorSlice) {
+	c.cond.L.Lock()
+	for c.value == nil {
+		c.cond.Wait()
+	}
+	v, c.value = *c.value, nil
+	c.cond.Broadcast()
+	c.cond.L.Unlock()
+	return v
 }
 
 type distributorChannels struct {
@@ -80,7 +118,7 @@ func evolveSlice(slice HorSlice, p Params, c distributorChannels, turn int) [][]
 			newSlice[i-slice.startRow][j] = updatedCell
 			// cellFlipped event
 			if updatedCell != slice.grid[i][j] {
-				c.events <- CellFlipped{turn, util.Cell{j, i}}
+				c.events <- CellFlipped{turn, util.Cell{X: j, Y: i}}
 			}
 		}
 	}
@@ -88,9 +126,9 @@ func evolveSlice(slice HorSlice, p Params, c distributorChannels, turn int) [][]
 }
 
 // create a worker assigned to a segment of the image
-func worker(slice HorSlice, p Params, output chan HorSlice, c distributorChannels, turn int) {
+func worker(slice HorSlice, p Params, output *HSliceChannel, c distributorChannels, turn int) {
 	newSlice := evolveSlice(slice, p, c, turn)
-	output <- HorSlice{newSlice, slice.startRow, slice.endRow}
+	output.Send(HorSlice{newSlice, slice.startRow, slice.endRow}, true)
 }
 
 // get a list of the alive cells existing in the world
@@ -144,7 +182,7 @@ func checkTicker(ticker *time.Ticker, world [][]byte, turn int, c distributorCha
 }
 
 // parse keypresses and execute the different actions
-func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan int, worldState <-chan HorSlice, wg *sync.WaitGroup, quit chan<- bool) {
+func keypressParser(p Params, c distributorChannels, kp <-chan rune, turnChan *channels.IntChannel, worldChan *HSliceChannel, wg *sync.WaitGroup, quit *channels.BoolChannel) {
 	paused := false
 	for {
 		key := <-kp
@@ -154,17 +192,22 @@ func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan
 				continue
 			}
 			// generate PGM image of current state
-			generatePGM(p, c, (<-worldState).grid, <-turn)
+			turn, _ := turnChan.Receive(true)
+			worldState := worldChan.Receive()
+			generatePGM(p, c, worldState.grid, turn)
 		case 'q':
 			// generate PGM image and terminate
 			if paused {
 				continue
 			}
-			generatePGM(p, c, (<-worldState).grid, <-turn)
+			turn, _ := turnChan.Receive(true)
+			worldState := worldChan.Receive()
+			generatePGM(p, c, worldState.grid, turn)
 			c.ioCommand <- ioCheckIdle
 			<-c.ioIdle
-			c.events <- StateChange{CompletedTurns: <-turn, NewState: Quitting}
-			quit <- true
+			turn, _ = turnChan.Receive(true)
+			c.events <- StateChange{CompletedTurns: turn, NewState: Quitting}
+			quit.Send(true, true)
 			return
 		case 'p':
 			// pause execution. If already paused, continue
@@ -172,11 +215,13 @@ func keypressParser(p Params, c distributorChannels, kp <-chan rune, turn <-chan
 				paused = false
 				wg.Done()
 				fmt.Println("Continuing")
-				c.events <- StateChange{CompletedTurns: <-turn, NewState: Executing}
+				turn, _ := turnChan.Receive(true)
+				c.events <- StateChange{CompletedTurns: turn, NewState: Executing}
 			} else {
 				paused = true
 				wg.Add(1)
-				c.events <- StateChange{CompletedTurns: <-turn, NewState: Paused}
+				turn, _ := turnChan.Receive(true)
+				c.events <- StateChange{CompletedTurns: turn, NewState: Paused}
 			}
 		}
 	}
@@ -207,16 +252,16 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	ticker := time.NewTicker(2 * time.Second)
 
 	// start keypress parser
-	turnSender := make(chan int)
-	kpStateUpdates := make(chan HorSlice)
-	quit := make(chan bool)
+	turnSender := channels.NewIntChannel()
+	kpStateUpdates := NewHSliceChannel()
+	quit := channels.NewBoolChannel()
 	var golLoop sync.WaitGroup
 	go keypressParser(p, c, kp, turnSender, kpStateUpdates, &golLoop, quit)
 
 	// TODO: Execute all turns of the Game of Life.
 	turn := 0
 	// creating channels
-	workerOutputChannel := make(chan HorSlice, p.Threads)
+	workerOutputChannel := NewHSliceChannel()
 	var waitgroup sync.WaitGroup
 	run := true
 
@@ -236,12 +281,11 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	}
 
 	for ; turn < p.Turns && run; turn++ {
-		select {
-		case turnSender <- turn:
-		case kpStateUpdates <- HorSlice{grid: world, startRow: 0, endRow: 0}:
-		case <-quit:
+		turnSender.Send(turn, false)
+		kpStateUpdates.Send(HorSlice{grid: world, startRow: 0, endRow: 0}, false)
+		_, success := quit.Receive(false)
+		if success {
 			run = false
-		default:
 		}
 		golLoop.Wait()
 		newWorld := createNewSlice(p.ImageHeight, p.ImageWidth)
@@ -253,7 +297,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 			go worker(slice, p, workerOutputChannel, c, turn)
 		}
 		for tr := 0; tr < p.Threads; tr++ {
-			newSlice := <-workerOutputChannel
+			newSlice := workerOutputChannel.Receive()
 			waitgroup.Add(1)
 			go func() {
 				for i := newSlice.startRow; i < newSlice.endRow; i++ {
@@ -272,7 +316,6 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 		// checking if ticker has ticked
 		checkTicker(ticker, world, turn+1, c)
 	}
-	close(workerOutputChannel)
 	// Generate a PGM image at turn 100
 	generatePGM(p, c, world, turn)
 

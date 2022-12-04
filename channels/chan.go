@@ -4,69 +4,120 @@ import (
 	"sync"
 )
 
-// no generics means weird go workarounds 👍
+// no generics means code duplication 👍
+// trust me i tried to use go's pre-generic generic workaround and it didnt work
+const Fail = -0xff
 
-// homemade channel implementation
-type Channel struct {
-	value      *interface{}
+// declare channel structs and interface for each type we need
+
+/* channel implementation for integers */
+type IntChannel struct {
+	value      *int
+	cond       *sync.Cond
+}
+/* channel implementation for bools*/
+type BoolChannel struct {
+	value      *bool
 	cond       *sync.Cond
 }
 
-type ChanInterface interface {
-	Send(value interface{}, block bool)
-	Receive(block bool) interface{}
+// define the initialisation functions
+func NewIntChannel() *IntChannel {
+	m := new(sync.Mutex)
+	return &IntChannel{value: nil, cond: sync.NewCond(m)}
 }
 
-// define the initialisation function
-func NewChannel() *Channel {
+func NewBoolChannel() *BoolChannel {
 	m := sync.Mutex{}
-	return &Channel{value: nil, cond: sync.NewCond(&m)}
+	return &BoolChannel{value: nil, cond: sync.NewCond(&m)}
 }
 
-// define interface method implementations
+// define implementations
 
 /*
-Send a value down the channel
- - value {interface{}} value to send 
- - block {bool} should we block until the value has been successfully sent?
+Sends a value into the channel
+ - value {int} the value to send
+ - block {bool} should we block the thread until sent?
 */
-func (c *Channel) Send(value interface{}, block bool) {
+func (c *IntChannel) Send(value int, block bool) {
 	c.cond.L.Lock()
 	for c.value != nil {
 		if !block {
+			c.cond.L.Unlock()
 			return
 		}
 		c.cond.Wait()
 	}
-	*c.value = value
+	c.value = &value
 	c.cond.Broadcast()
+	c.cond.L.Unlock()
 }
 
 /*
-Receive a value from the channel
- - block {bool} should we block until a value has been retrieved?
- - returns value {interface{}} - requires type assertion before use
+Receives a value from the channel
+ - block {bool} should we block thread until we get something?
+ - returns value {int}, success {bool}
+If blocking receiving, then the success value can be ignored
 */
-func (c *Channel) Receive(block bool) interface{} {
+func (c *IntChannel) Receive(block bool) (value int, success bool) {
 	c.cond.L.Lock()
 	for c.value == nil {
 		if !block {
-			return nil
+			c.cond.L.Unlock()
+			return Fail, false
 		}
 		c.cond.Wait()
 	}
-	defer c.cond.Broadcast()
-	value := *c.value
+	defer func() {
+		c.cond.Broadcast()
+		c.cond.L.Unlock()
+	}()
+	value = *c.value
 	c.value = nil
-	return value
+	return value, true
 }
 
 /*
-helper function for checking. Use when doing type assertion
- - ok {bool} can the underlying type of {interface{}} be casted?
+Sends a value into the channel
+ - value {bool} the value to send
+ - block {bool} should we block the thread until sent?
 */
-func CheckOk(ok bool) {
-	if !ok {
-		panic("Incorrect type was received")
+func (c *BoolChannel) Send(value bool, block bool) {
+	c.cond.L.Lock()
+	for c.value != nil {
+		if !block {
+			c.cond.L.Unlock()
+			return
+		}
+		c.cond.Wait()
 	}
+	c.value = &value
+	c.cond.Broadcast()
+	c.cond.L.Unlock()
 }
+
+/*
+Receives a value from the channel
+ - block {bool} should we block thread until we get something?
+ - returns value {bool}, success {bool}
+If blocking receiving, then the success value can be ignored
+*/
+func (c *BoolChannel) Receive(block bool) (bool, success bool) {
+	c.cond.L.Lock()
+	for c.value == nil {
+		if !block {
+			c.cond.L.Unlock()
+			return false, false
+		}
+		c.cond.Wait()
+	}
+	defer func() {
+		c.cond.Broadcast()
+		c.cond.L.Unlock()
+	}()
+	value := *c.value
+	c.value = nil
+	return value, false
+}
+
+
