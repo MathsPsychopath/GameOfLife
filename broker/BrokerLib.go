@@ -52,10 +52,11 @@ func (b *Broker) removeWorkersFromRegister(byWorker bool, ids ...int) {
 }
 
 // sets a new worker on b.Workers
-func (b *Broker) addWorker(client *rpc.Client) {
+func (b *Broker) addWorker(client *rpc.Client, ip string) {
 	b.Mu.Lock()
 	newWorker := WorkerInfo{
-		client: client,
+		client:    client,
+		ipAddress: ip,
 	}
 	b.Workers[b.NextID] = &newWorker
 	b.workerIds = append(b.workerIds, b.NextID)
@@ -98,6 +99,25 @@ func divideEvenly(b *Broker) {
 	}
 }
 
+func (b *Broker) getHaloIPs(i int) (topWorkerIp, botWorkerIp string) {
+
+	//topworker is also the previous worker because we are going top to bottom during section allocation
+	topWorkerIndex := i - 1
+	if topWorkerIndex == -1 {
+		topWorkerIndex = len(b.workerIds) - 1
+	}
+	botWorkerIndex := i + 1
+	if botWorkerIndex == len(b.workerIds) {
+		botWorkerIndex = 0
+	}
+	topWorkerId := b.workerIds[topWorkerIndex]
+	botWorkerId := b.workerIds[botWorkerIndex]
+	topWorkerIp = b.Workers[topWorkerId].ipAddress
+	botWorkerIp = b.Workers[botWorkerId].ipAddress
+	fmt.Printf("topIp: %s, botIp %s\n", topWorkerIp, botWorkerIp)
+	return
+}
+
 // prime workers should set the slice size that workers use for processing
 // IMPORTANT: must mutex lock in calling scope
 func (b *Broker) primeWorkers(firstTime bool) {
@@ -107,16 +127,12 @@ func (b *Broker) primeWorkers(firstTime bool) {
 	currRowOffset := 0
 	//this is assuming that the order of the map does not change within this function
 	for i, id := range b.workerIds {
-		fmt.Println("in for loop")
 		b.Workers[id].rowOffset = currRowOffset
 		workSize := b.Workers[id].workSize
-		//topworker is also the previous worker because we are going top to bottom during section allocation
-		topWorkerId := b.workerIds[(i-1)%len(b.workerIds)] //% is to make if index == -1 then index = len-1
-		botWorkerId := b.workerIds[i+1%len(b.workerIds)]   //% is to make if index == len then index = 0
+
 		topWorkerIp, botWorkerIp := "", ""
 		if len(b.workerIds) > 1 {
-			topWorkerIp = b.Workers[topWorkerId].ipAddress
-			botWorkerIp = b.Workers[botWorkerId].ipAddress
+			topWorkerIp, botWorkerIp = b.getHaloIPs(i)
 		}
 		initRequest := stubs.InitWorkerRequest{
 			Height:      workSize,
@@ -128,7 +144,9 @@ func (b *Broker) primeWorkers(firstTime bool) {
 		}
 		worker := b.Workers[id].client
 		err := worker.Call(stubs.InitialiseWorker, initRequest, new(stubs.NilResponse))
-		fmt.Printf("err: %s\n", err)
+		if err != nil {
+			fmt.Printf("err: %s\n", err)
+		}
 		currRowOffset += workSize //keeping track of currentRowOffset
 	}
 	fmt.Println("Finished priming")
@@ -186,7 +204,9 @@ func (b *Broker) getSectionSlice(workerId int) [][]byte {
 
 // applies the flipped cell changes to the broker's current world
 func (b *Broker) applyChanges(flippedCells []util.Cell) {
+	b.Mu.Lock()
 	for _, cell := range flippedCells {
 		b.CurrentWorld[cell.Y][cell.X] ^= 0xFF
 	}
+	b.Mu.Unlock()
 }

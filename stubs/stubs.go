@@ -90,8 +90,6 @@ var PushHalo = "Worker.PushHalo"
 
 var BrokerPushState = "Broker.PushState"
 
-type IPAddress string
-
 // No information needed request
 type NilRequest struct{}
 
@@ -100,7 +98,7 @@ type NilResponse struct{}
 
 // This request gives the broker the IP address a worker is listening on
 type ConnectRequest struct {
-	IP IPAddress
+	IP string
 }
 
 // This response is given when a worker successfully connects

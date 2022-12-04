@@ -78,14 +78,17 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 			b.Mu.Unlock()
 			if workersRespondedCount == len(b.workerIds) { //if all flippedCells received for next turn
 				b.lastCompletedTurn++
-				fmt.Printf("workers responded: %d, turn %d\n", workersRespondedCount, b.lastCompletedTurn)
+				//send error if we don't get here within a second
+				// fmt.Printf("workers responded: %d, turn %d\n", workersRespondedCount, b.lastCompletedTurn)
 				//update controller
+				fmt.Printf("turn %d\n", b.lastCompletedTurn)
 				pushReq := stubs.PushStateRequest{
 					FlippedCells: b.flippedCells[b.lastCompletedTurn],
 					Turn:         b.lastCompletedTurn,
 				}
 				b.Mu.Lock()
 				if b.Controller != nil {
+					b.Mu.Unlock()
 					b.Controller.Go(stubs.PushState, pushReq, new(stubs.NilResponse), nil)
 				}
 				//delete entry from maps
@@ -155,7 +158,7 @@ func (b *Broker) WorkerConnect(req stubs.ConnectRequest, res *stubs.ConnectRespo
 		err = errors.New("broker > could not dial IP " + string(req.IP))
 	}
 	res.Id = b.NextID
-	b.addWorker(client)
+	b.addWorker(client, string(req.IP))
 	b.primeWorkers(true)
 	fmt.Println("Worker connected successfully!")
 	return

@@ -87,10 +87,13 @@ func (w *Worker) EvolveSlice(req stubs.WorkRequest, res *stubs.NilResponse) (err
 func dialWorker(ip string) *rpc.Client {
 	client, dialError := rpc.Dial("tcp", string(ip))
 	if dialError != nil {
-		fmt.Errorf("broker > could not dial IP " + string(ip))
+		fmt.Println(dialError)
+	} else {
+		fmt.Println("no dial error")
 	}
 	return client
 }
+
 func (w *Worker) InitialiseWorker(req stubs.InitWorkerRequest, res *stubs.NilResponse) (err error) {
 	// if using bit masking, then set it to height - 1, width - 1
 	if !req.FirstTime {
@@ -109,6 +112,8 @@ func (w *Worker) InitialiseWorker(req stubs.InitWorkerRequest, res *stubs.NilRes
 	if req.TopWorkerIP != "" {
 		w.topWorker = dialWorker(req.TopWorkerIP)
 		w.botWorker = dialWorker(req.BotWorkerIP)
+	} else {
+		fmt.Println("top worker ip: ", req.TopWorkerIP)
 	}
 	w.reprime = true
 	return
@@ -156,7 +161,7 @@ func main() {
 	worker.broker = broker
 	res := new(stubs.ConnectResponse)
 	req := stubs.ConnectRequest{
-		IP: stubs.IPAddress("127.0.0.1:" + *pAddr),
+		IP: "127.0.0.1:" + *pAddr,
 	}
 	broker.Call(stubs.WorkerConnect, req, res)
 	worker.id = res.Id

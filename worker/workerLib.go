@@ -80,12 +80,12 @@ func (w *Worker) pushHalos(topDone, botDone chan *rpc.Call) {
 		IsTop: true,
 	}
 	<-topDone //make sure that previous pushHalo was received
-	w.topWorker.Go(stubs.PushHalo, topHaloPushReq, stubs.NilResponse{}, topDone)
+	w.topWorker.Go(stubs.PushHalo, topHaloPushReq, new(stubs.NilResponse), topDone)
 
 	botHaloPushReq := stubs.PushHaloRequest{ //this is the botHalo of the adjacent worker (above this one)
 		Halo:  w.container.CurrentWorld[0], //first row
 		IsTop: false,
 	}
 	<-botDone //make sure that previous pushHalo was received by adjacent worker
-	w.botWorker.Go(stubs.PushHalo, botHaloPushReq, stubs.NilResponse{}, botDone)
+	w.botWorker.Go(stubs.PushHalo, botHaloPushReq, new(stubs.NilResponse), botDone)
 }
