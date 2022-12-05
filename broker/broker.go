@@ -76,6 +76,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 			b.Mu.Lock()
 			workersRespondedCount := len(b.workersResponded[b.lastCompletedTurn+1])
 			b.Mu.Unlock()
+			// time.Sleep(time.Millisecond * 100)
 			if workersRespondedCount == len(b.workerIds) { //if all flippedCells received for next turn
 				b.lastCompletedTurn++
 				//send error if we don't get here within a second

@@ -72,6 +72,7 @@ func (w *Worker) EvolveSlice(req stubs.WorkRequest, res *stubs.NilResponse) (err
 		brokerReq := stubs.BrokerPushStateRequest{
 			FlippedCells: flipped,
 			Turn:         i,
+			WorkerId:     w.id,
 		}
 		w.broker.Go(stubs.BrokerPushState, brokerReq, new(stubs.NilResponse), brokerDone)
 		wg.Add(1)

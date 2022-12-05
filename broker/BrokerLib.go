@@ -31,11 +31,12 @@ type Broker struct {
 	workersResponded  map[int]map[int]bool //turn: (id : bool)
 	workerIds         []int
 	exit              bool
+	processCellsReq   chan bool
 }
 
 // initialises Broker struct
 func NewBroker() *Broker {
-	return &Broker{NextID: 0, Mu: new(sync.Mutex), Controller: nil, Workers: map[int]*WorkerInfo{}, workerIds: []int{}, workersResponded: make(map[int]map[int]bool), flippedCells: make(map[int][]util.Cell), lastCompletedTurn: 0}
+	return &Broker{processCellsReq: make(chan bool), NextID: 0, Mu: new(sync.Mutex), Controller: nil, Workers: map[int]*WorkerInfo{}, workerIds: []int{}, workersResponded: make(map[int]map[int]bool), flippedCells: make(map[int][]util.Cell), lastCompletedTurn: 0}
 }
 
 // removes all worker ids from b.Workers map
