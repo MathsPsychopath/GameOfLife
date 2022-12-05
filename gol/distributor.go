@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/rpc"
 	"strconv"
+	"sync"
 	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
@@ -12,11 +13,11 @@ import (
 
 const (
 	aliveCellsTickerFunc = iota
-	kpListenerFunc
-	distributorFunc
-	pushState
 	receiver
+	distributorFunc
 )
+
+const enumSize = 3
 
 type distributorChannels struct {
 	events     chan<- Event
@@ -28,30 +29,34 @@ type distributorChannels struct {
 }
 
 type Controller struct {
+	m                 sync.Mutex
 	acknowledgedCells stubs.CellsContainer
 	eventsSender      Sender
 	exitChannels      map[int]chan bool
 	d                 distributorChannels
 }
 
-var contr Controller
+var controller Controller
 
 // execute RPC calls to poll the number of alive cells every 2 seconds
 func (c *Controller) aliveCellsTicker(client *rpc.Client) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	select {
-	case <-ticker.C:
-		aliveCellsCount, turn := c.acknowledgedCells.GetAliveCount()
-		c.eventsSender.SendAliveCellsList(turn, aliveCellsCount)
-	case <-c.exitChannels[aliveCellsTickerFunc]:
-		break
+
+	for {
+		select {
+		case <-ticker.C:
+			aliveCellsCount, turn := c.acknowledgedCells.GetAliveCount()
+			c.eventsSender.SendAliveCellsList(turn, aliveCellsCount)
+		case <-c.exitChannels[aliveCellsTickerFunc]:
+			break
+		}
 	}
+
 }
 
-func (c *Controller) kpListener(kp <-chan rune, client *rpc.Client, p Params) {
-	for {
-		key := <-kp
+func (c *Controller) kpListener(kp <-chan rune, client *rpc.Client) {
+	for key := range kp {
 		switch key {
 		case 's':
 			//output a pgm image
@@ -60,10 +65,10 @@ func (c *Controller) kpListener(kp <-chan rune, client *rpc.Client, p Params) {
 		case 'q':
 			//close the local controller
 			_, turn := c.acknowledgedCells.Get()
-			client.Call(stubs.ControllerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
+			// client.Call(stubs.ControllerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
 			c.eventsSender.SendStateChange(turn, Quitting)
 			// make sure every goroutine dependent on exit is shutdown
-			c.sendExitSignals()
+			c.exitChannels[distributorFunc] <- true
 
 		case 'k':
 			//kill the distributed system
@@ -76,7 +81,7 @@ func (c *Controller) kpListener(kp <-chan rune, client *rpc.Client, p Params) {
 			c.eventsSender.SendOutputPGM(world, turn)
 			c.eventsSender.SendStateChange(turn, Quitting)
 			// make sure every goroutine dependent on exit is shutdown
-			c.sendExitSignals()
+			c.exitChannels[distributorFunc] <- true
 
 		case 'p':
 			//pause/unpause the processing
@@ -97,40 +102,46 @@ func (c *Controller) kpListener(kp <-chan rune, client *rpc.Client, p Params) {
 
 func newController() Controller {
 	exitChannels := make(map[int]chan bool)
+	for i := 0; i < enumSize; i++ {
+		exitChannels[i] = make(chan bool)
+	}
 	return Controller{
 		acknowledgedCells: *stubs.NewCellsContainer(),
 		exitChannels:      exitChannels,
+		m:                 *new(sync.Mutex),
 	}
 }
 
 func (c *Controller) sendExitSignals() {
-	for _, channel := range c.exitChannels {
-		channel <- true
-	}
+	c.m.Lock()
+	go func() {
+		c.exitChannels[aliveCellsTickerFunc] <- true
+	}()
+	c.exitChannels[receiver] <- true
+
+	c.m.Unlock()
 }
 
 // distributor distributes the work to the broker via rpc calls
 func distributor(p Params, d distributorChannels, kp <-chan rune) {
-	contr = newController()
-	rpc.Register(&contr)
+	controller = newController()
+	rpc.Register(&controller)
 
 	// provide global info for rpc call handlers to use
-	contr.eventsSender = Sender{C: d, P: p}
+	controller.eventsSender = Sender{C: d, P: p}
 
 	// load the initial world
-	cells := contr.eventsSender.GetInitialAliveCells()
-	contr.eventsSender.SendFlippedCellList(0, cells...)
+	cells := controller.eventsSender.GetInitialAliveCells()
+	controller.eventsSender.SendFlippedCellList(0, cells...)
 
 	if p.Turns == 0 {
-		contr.eventsSender.SendOutputPGM(stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth), 0)
-		contr.eventsSender.SendFinalTurn(0, cells)
-		close(d.events)
+		controller.shutDownSequence()
 		return
 	}
-	contr.eventsSender.SendTurnComplete(0)
+	controller.eventsSender.SendTurnComplete(0)
 
 	// store the initial world in memory
-	contr.acknowledgedCells.UpdateWorld(
+	controller.acknowledgedCells.UpdateWorld(
 		stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth),
 	)
 
@@ -138,19 +149,19 @@ func distributor(p Params, d distributorChannels, kp <-chan rune) {
 
 	// start listening for broker requests
 	isListening := make(chan bool)
-	go contr.receiver(isListening, p)
+	go controller.receiver(isListening, p)
 	<-isListening
 
 	// dial the Broker.
 	client, err := rpc.Dial("tcp", p.BrokerAddr)
-	defer client.Close()
 	if err != nil {
 		fmt.Println("error when dialing broker")
 		fmt.Printf("error message: %s\n", err)
 		fmt.Printf("broker address: %s\n", p.BrokerAddr)
+		controller.shutDownSequence()
 		return
 	}
-	go contr.aliveCellsTicker(client)
+	go controller.aliveCellsTicker(client)
 
 	// connect to the broker
 	listenSocket := p.ListenIP + ":" + strconv.Itoa(p.ListenPort)
@@ -164,7 +175,7 @@ func distributor(p Params, d distributorChannels, kp <-chan rune) {
 	fmt.Println("Successfully connected to broker")
 
 	// start keypress listener
-	go contr.kpListener(kp, client, p)
+	go controller.kpListener(kp, client)
 
 	// execute rpc
 	stubParams := stubs.StubParams{Turns: p.Turns, Threads: p.Threads, ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight}
@@ -178,48 +189,55 @@ func distributor(p Params, d distributorChannels, kp <-chan rune) {
 	select {
 	case <-done:
 		fmt.Println("received done")
-	case <-contr.exitChannels[distributorFunc]:
-		close(d.events)
-		return
-	}
+	case <-controller.exitChannels[distributorFunc]:
 
-	close(done)
+	}
 	// exit the broker
+	fmt.Println("0")
 	client.Call(stubs.ControllerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
+	fmt.Println("1")
 	client.Close()
+
+	fmt.Println("2")
+	close(done)
+
+	fmt.Println("3")
+	controller.sendExitSignals()
+	fmt.Println("4")
+	controller.shutDownSequence()
+	fmt.Printf("after\n")
+}
+
+func (c *Controller) shutDownSequence() {
 	// Get the final state of the world
-	world, turn := contr.acknowledgedCells.Get()
+	world, turn := controller.acknowledgedCells.Get()
 
 	// Output the final image
-	contr.eventsSender.SendOutputPGM(world, turn)
+	controller.eventsSender.SendOutputPGM(world, turn)
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-	contr.eventsSender.SendFinalTurn(turn+1, stubs.GetAliveCells(world))
-
+	controller.eventsSender.SendFinalTurn(turn, stubs.GetAliveCells(world)) //turn+1? DEBUG
 	// Make sure that the Io has finished any output before exiting.
-	d.ioCommand <- ioCheckIdle
-	<-d.ioIdle
+	c.d.ioCommand <- ioCheckIdle
+	<-c.d.ioIdle
+	// fmt.Printf("before\n")
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	close(d.events)
-	contr.sendExitSignals()
+	close(c.d.events)
 }
 
 // This method will be called if the Broker has a calculated new state
 // for the user to view in SDL window
 func (c *Controller) PushState(req stubs.PushStateRequest, res *stubs.NilResponse) (err error) {
-	select {
-	case <-c.exitChannels[pushState]:
-		return
-	default:
-
-	}
+	c.m.Lock()
+	fmt.Printf("turn: %d\n", req.Turn)
 	// util.VisualiseSquare(c.acknowledgedCells.CurrentWorld, len(c.acknowledgedCells.CurrentWorld), len(c.acknowledgedCells.CurrentWorld))
 	c.acknowledgedCells.UpdateWorldAndTurn(req.FlippedCells, req.Turn)
 	// util.VisualiseSquare(c.acknowledgedCells.CurrentWorld, len(c.acknowledgedCells.CurrentWorld), len(c.acknowledgedCells.CurrentWorld))
 	// c.eventsSender.SendOutputPGM(c.acknowledgedCells.CurrentWorld, req.Turn) //DEBUG
 	c.eventsSender.SendFlippedCellList(req.Turn, req.FlippedCells...)
 	c.eventsSender.SendTurnComplete(req.Turn)
+	c.m.Unlock()
 	return
 }
 
@@ -228,6 +246,7 @@ func (c *Controller) receiver(listening chan<- bool, p Params) {
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(p.ListenPort))
 	if err != nil {
 		fmt.Println("could not listen on port " + strconv.Itoa(p.ListenPort))
+		fmt.Printf("listenErr: %s\n", err.Error())
 		return
 	}
 	defer listener.Close()
@@ -236,4 +255,5 @@ func (c *Controller) receiver(listening chan<- bool, p Params) {
 	select {
 	case <-c.exitChannels[receiver]:
 	}
+	return
 }

@@ -11,6 +11,8 @@ import (
 	"uk.ac.bris.cs/gameoflife/stubs"
 )
 
+const doneBuffer = 10
+
 // initialises bidirectional comms with controller
 func (b *Broker) ControllerConnect(req stubs.ConnectRequest, res *stubs.NilResponse) (err error) {
 	fmt.Println("Received controller connect request")
@@ -44,9 +46,8 @@ func (b *Broker) startWorkers(req stubs.StartGOLRequest) {
 			StartTurn:      b.lastCompletedTurn + 1,
 			IsSingleWorker: (len(b.workerIds) < 2),
 		}
-		b.Workers[id].client.Go(stubs.EvolveSlice, req, nil, nil)
+		b.Workers[id].client.Go(stubs.EvolveSlice, req, new(stubs.NilResponse), nil)
 	}
-
 }
 
 // starts the Game of Life Loop
@@ -55,9 +56,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 	b.lastCompletedTurn = 0
 	b.setParams(req.P)
 	if req.P.Turns == 0 { //if no turns to be executed, just send back initial state
-		b.Mu.Lock()
 		b.Controller.Call(stubs.PushState, stubs.PushStateRequest{Turn: 0, FlippedCells: req.InitialAliveCells}, new(stubs.NilResponse))
-		b.Mu.Unlock()
 		return
 	}
 	b.initialiseWorld(req.InitialAliveCells)
@@ -66,40 +65,59 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 	b.startWorkers(req)
 	// check for errors
 	// fmt.Printf("lastCompletedTurn: %d totalTurns: %d controllerNil?: %t\n", b.lastCompletedTurn, req.P.Turns, b.Controller == nil)
+	lastPushState := time.Now()
+	// done := make(chan *rpc.Call, doneBuffer)
 	for b.lastCompletedTurn < req.P.Turns && b.Controller != nil {
-		// fmt.Printf("lastCompletedTurn: %d totalTurns: %d controllerNil?: %t\n", b.lastCompletedTurn, req.P.Turns, b.Controller == nil)
-		select {
-		case <-b.errorChan: //if error: restart workers
-			b.startWorkers(req)
-
-		default:
-			b.Mu.Lock()
-			workersRespondedCount := len(b.workersResponded[b.lastCompletedTurn+1])
-			b.Mu.Unlock()
-			// time.Sleep(time.Millisecond * 100)
-			if workersRespondedCount == len(b.workerIds) { //if all flippedCells received for next turn
-				b.lastCompletedTurn++
-				//send error if we don't get here within a second
-				// fmt.Printf("workers responded: %d, turn %d\n", workersRespondedCount, b.lastCompletedTurn)
-				//update controller
-				fmt.Printf("turn %d\n", b.lastCompletedTurn)
-				pushReq := stubs.PushStateRequest{
-					FlippedCells: b.flippedCells[b.lastCompletedTurn],
-					Turn:         b.lastCompletedTurn,
-				}
-				b.Mu.Lock()
-				if b.Controller != nil {
-					b.Mu.Unlock()
-					b.Controller.Go(stubs.PushState, pushReq, new(stubs.NilResponse), nil)
-				}
-				//delete entry from maps
-				b.applyChanges(b.flippedCells[b.lastCompletedTurn])
-				delete(b.workersResponded, b.lastCompletedTurn)
-				delete(b.flippedCells, b.lastCompletedTurn)
+		if time.Now().Second()-lastPushState.Second() > int(time.Second.Seconds()) {
+			if b.Controller == nil {
+				lastPushState = time.Now()
+				continue
+			}
+			// get workers not responded
+			workersNotResponded := b.getWorkersNotResponded()
+			for id := range workersNotResponded {
+				b.errorChan <- id
 			}
 		}
+		// fmt.Printf("lastCompletedTurn: %d totalTurns: %d controllerNil?: %t\n", b.lastCompletedTurn, req.P.Turns, b.Controller == nil)
+		select {
+		case badWorkerId := <-b.errorChan: //if error: restart workers
+			// reset all vars
+			//remove bad worker with id
+			b.resetBroker(badWorkerId)
+
+			b.startWorkers(req)
+			lastPushState = time.Now()
+
+		case <-b.processCellsReq:
+			b.Mu.Lock()
+			if b.Controller == nil {
+				b.Mu.Unlock()
+				continue
+			}
+			b.lastCompletedTurn++
+			//send error if we don't get here within a second
+			// fmt.Printf("workers responded: %d, turn %d\n", workersRespondedCount, b.lastCompletedTurn)
+			//update controller
+			fmt.Printf("turn %d\n", b.lastCompletedTurn)
+			pushReq := stubs.PushStateRequest{
+				FlippedCells: b.flippedCells[b.lastCompletedTurn],
+				Turn:         b.lastCompletedTurn,
+			}
+			b.Controller.Call(stubs.PushState, pushReq, new(stubs.NilResponse))
+			//delete entry from maps
+			b.applyChanges(b.flippedCells[b.lastCompletedTurn])
+			delete(b.workersResponded, b.lastCompletedTurn)
+			delete(b.flippedCells, b.lastCompletedTurn)
+			lastPushState = time.Now()
+			b.Mu.Unlock()
+		default:
+
+		}
+
 	}
-	b.primeWorkers(false)
+	b.resetBroker(-1)
+	b.primeWorkers(true) //to stop the workers from carrying on executing turns when controller disconnects before all turns have been processed
 	fmt.Println("brokerStartGol Done")
 	return
 }
@@ -115,6 +133,7 @@ func (b *Broker) ServerQuit(req stubs.NilRequest, res *stubs.NilResponse) (err e
 // remove the controller on voluntary request
 func (b *Broker) ControllerQuit(req stubs.NilRequest, res *stubs.NilResponse) (err error) {
 	b.removeController()
+	fmt.Println("CONTROLLER QUIT")
 	return
 }
 
@@ -132,7 +151,7 @@ func (b *Broker) PauseState(req stubs.NilRequest, res *stubs.PauseResponse) (err
 
 func (b *Broker) PushState(req stubs.BrokerPushStateRequest, res *stubs.NilResponse) (err error) {
 	b.Mu.Lock()
-	if b.exit {
+	if b.exit || b.Controller == nil {
 		b.Mu.Unlock()
 		return
 	}
@@ -146,6 +165,11 @@ func (b *Broker) PushState(req stubs.BrokerPushStateRequest, res *stubs.NilRespo
 		b.flippedCells[req.Turn] = append(b.flippedCells[req.Turn], req.FlippedCells...)
 	} else {
 		b.flippedCells[req.Turn] = req.FlippedCells
+	}
+	if len(b.workersResponded[req.Turn]) == len(b.workerIds) { //if all cells have been processed for this turn
+		go func() {
+			b.processCellsReq <- true //send cell process request
+		}()
 	}
 	b.Mu.Unlock()
 	return

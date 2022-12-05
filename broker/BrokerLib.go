@@ -25,18 +25,38 @@ type Broker struct {
 	isPaused          bool
 	Params            stubs.StubParams
 	CurrentWorld      [][]byte
-	lastCompletedTurn int
-	errorChan         chan bool            //if new worker added, worker deleted ... any change
+	lastCompletedTurn int                  //if new worker added, worker deleted ... any change
 	flippedCells      map[int][]util.Cell  //turn : flippedCells
 	workersResponded  map[int]map[int]bool //turn: (id : bool)
 	workerIds         []int
 	exit              bool
 	processCellsReq   chan bool
+	errorChan         chan int
 }
 
 // initialises Broker struct
 func NewBroker() *Broker {
-	return &Broker{processCellsReq: make(chan bool), NextID: 0, Mu: new(sync.Mutex), Controller: nil, Workers: map[int]*WorkerInfo{}, workerIds: []int{}, workersResponded: make(map[int]map[int]bool), flippedCells: make(map[int][]util.Cell), lastCompletedTurn: 0}
+	return &Broker{errorChan: make(chan int), processCellsReq: make(chan bool), NextID: 0, Mu: new(sync.Mutex), Controller: nil, Workers: map[int]*WorkerInfo{}, workerIds: []int{}, workersResponded: make(map[int]map[int]bool), flippedCells: make(map[int][]util.Cell)}
+}
+
+func (b *Broker) resetBroker(id int) {
+	//resetting variables
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
+	b.flippedCells = make(map[int][]util.Cell)
+	b.workersResponded = make(map[int]map[int]bool)
+	b.lastCompletedTurn = 0
+	// flush channels
+	for len(b.processCellsReq) != 0 {
+		<-b.processCellsReq
+	}
+	//remove bad worker
+	if id != -1 {
+		b.Workers[id].client.Go(stubs.Shutdown, new(stubs.NilRequest), new(stubs.NilResponse), nil)
+		delete(b.Workers, id)
+		b.workerIds = stubs.RemoveSliceElement(b.workerIds, id)
+	}
+
 }
 
 // removes all worker ids from b.Workers map
@@ -119,6 +139,16 @@ func (b *Broker) getHaloIPs(i int) (topWorkerIp, botWorkerIp string) {
 	return
 }
 
+func (b *Broker) getWorkersNotResponded() []int {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
+	out := b.workerIds
+	for workerId := range b.workersResponded {
+		out = stubs.RemoveSliceElement(b.workerIds, workerId)
+	}
+	return out
+}
+
 // prime workers should set the slice size that workers use for processing
 // IMPORTANT: must mutex lock in calling scope
 func (b *Broker) primeWorkers(firstTime bool) {
@@ -174,6 +204,7 @@ func (b *Broker) setParams(p stubs.StubParams) {
 func (b *Broker) initialiseWorld(initialAliveCells []util.Cell) {
 	b.Mu.Lock()
 	b.CurrentWorld = stubs.ConstructWorld(initialAliveCells, b.Params.ImageHeight, b.Params.ImageWidth)
+	b.lastCompletedTurn = 0
 	b.Mu.Unlock()
 }
 
@@ -205,9 +236,7 @@ func (b *Broker) getSectionSlice(workerId int) [][]byte {
 
 // applies the flipped cell changes to the broker's current world
 func (b *Broker) applyChanges(flippedCells []util.Cell) {
-	b.Mu.Lock()
 	for _, cell := range flippedCells {
 		b.CurrentWorld[cell.Y][cell.X] ^= 0xFF
 	}
-	b.Mu.Unlock()
 }
