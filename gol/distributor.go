@@ -20,35 +20,36 @@ type HorSlice struct {
 // declare channel for HSlice on only used in this package
 
 type HSliceChannel struct {
-	value    *HorSlice
+	value    []HorSlice
 	cond     *sync.Cond
+	capacity int
 }
 
-func NewHSliceChannel() *HSliceChannel {
+func NewHSliceChannel(capacity int) *HSliceChannel {
 	m := new(sync.Mutex)
-	return &HSliceChannel{value: nil, cond: sync.NewCond(m)}
+	return &HSliceChannel{value: []HorSlice{}, cond: sync.NewCond(m), capacity: capacity}
 }
 
 func (c *HSliceChannel) Send(value HorSlice, block bool) {
 	c.cond.L.Lock()
-	for c.value != nil {
+	for len(c.value) == c.capacity {
 		if !block {
 			c.cond.L.Unlock()
 			return
 		}
 		c.cond.Wait()
 	}
-	c.value = &value
+	c.value = append(c.value, value)
 	c.cond.Broadcast()
 	c.cond.L.Unlock()
 }
 
 func (c *HSliceChannel) Receive() (v HorSlice) {
 	c.cond.L.Lock()
-	for c.value == nil {
+	for len(c.value) == 0 {
 		c.cond.Wait()
 	}
-	v, c.value = *c.value, nil
+	v, c.value = c.value[0], c.value[1:]
 	c.cond.Broadcast()
 	c.cond.L.Unlock()
 	return v
@@ -253,7 +254,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 
 	// start keypress parser
 	turnSender := channels.NewIntChannel()
-	kpStateUpdates := NewHSliceChannel()
+	kpStateUpdates := NewHSliceChannel(1)
 	quit := channels.NewBoolChannel()
 	var golLoop sync.WaitGroup
 	go keypressParser(p, c, kp, turnSender, kpStateUpdates, &golLoop, quit)
@@ -261,7 +262,7 @@ func distributor(p Params, c distributorChannels, kp <-chan rune) {
 	// TODO: Execute all turns of the Game of Life.
 	turn := 0
 	// creating channels
-	workerOutputChannel := NewHSliceChannel()
+	workerOutputChannel := NewHSliceChannel(p.Threads)
 	var waitgroup sync.WaitGroup
 	run := true
 
