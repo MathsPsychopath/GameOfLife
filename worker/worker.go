@@ -96,9 +96,9 @@ func dialWorker(ip string) *rpc.Client {
 
 func (w *Worker) InitialiseWorker(req stubs.InitWorkerRequest, res *stubs.NilResponse) (err error) {
 	w.repriming = true
-	// for w.inEvolveLoop {
-
-	// }
+	for w.inEvolveLoop {
+		time.Sleep(time.Millisecond * 100)
+	}
 	// if using bit masking, then set it to height - 1, width - 1
 	if !req.FirstTime {
 		stubs.FlushHaloChan(w.topHalo)

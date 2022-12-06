@@ -74,18 +74,20 @@ func (w *Worker) evolve(outputWorldSlice [][]byte, topHalo, botHalo []byte) []ut
 }
 
 func (w *Worker) pushHalos(topDone, botDone chan *rpc.Call) {
+	// IMPORTANT: TOP HALO GOES TO BOT WORKER!!!!!!!!!!!!!!!
+	// BOT HALO GOES TO TOP WORKER !!!!!!!!!!!!!!!!!!!!!!!!!!
 	//todo make below into 2 go routines
 	topHaloPushReq := stubs.PushHaloRequest{ //this is the topHalo of the adjacent worker (beneath this one)
 		Halo:  w.container.CurrentWorld[w.height-1], //last row
 		IsTop: true,
 	}
 	<-topDone //make sure that previous pushHalo was received
-	w.topWorker.Go(stubs.PushHalo, topHaloPushReq, new(stubs.NilResponse), topDone)
+	w.botWorker.Go(stubs.PushHalo, topHaloPushReq, new(stubs.NilResponse), topDone)
 
 	botHaloPushReq := stubs.PushHaloRequest{ //this is the botHalo of the adjacent worker (above this one)
 		Halo:  w.container.CurrentWorld[0], //first row
 		IsTop: false,
 	}
 	<-botDone //make sure that previous pushHalo was received by adjacent worker
-	w.botWorker.Go(stubs.PushHalo, botHaloPushReq, new(stubs.NilResponse), botDone)
+	w.topWorker.Go(stubs.PushHalo, botHaloPushReq, new(stubs.NilResponse), botDone)
 }

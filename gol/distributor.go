@@ -33,7 +33,6 @@ type Controller struct {
 	acknowledgedCells stubs.CellsContainer
 	eventsSender      Sender
 	exitChannels      map[int]chan bool
-	d                 distributorChannels
 }
 
 var controller Controller
@@ -64,9 +63,9 @@ func (c *Controller) kpListener(kp <-chan rune, client *rpc.Client) {
 			c.eventsSender.SendOutputPGM(world, turn)
 		case 'q':
 			//close the local controller
-			_, turn := c.acknowledgedCells.Get()
+			// _, turn := c.acknowledgedCells.Get()
 			// client.Call(stubs.ControllerQuit, stubs.NilRequest{}, new(stubs.NilResponse))
-			c.eventsSender.SendStateChange(turn, Quitting)
+			// c.eventsSender.SendStateChange(turn, Quitting)
 			// make sure every goroutine dependent on exit is shutdown
 			c.exitChannels[distributorFunc] <- true
 
@@ -134,16 +133,16 @@ func distributor(p Params, d distributorChannels, kp <-chan rune) {
 	cells := controller.eventsSender.GetInitialAliveCells()
 	controller.eventsSender.SendFlippedCellList(0, cells...)
 
-	if p.Turns == 0 {
-		controller.shutDownSequence()
-		return
-	}
 	controller.eventsSender.SendTurnComplete(0)
 
 	// store the initial world in memory
 	controller.acknowledgedCells.UpdateWorld(
 		stubs.ConstructWorld(cells, p.ImageHeight, p.ImageWidth),
 	)
+	if p.Turns == 0 {
+		controller.shutDownSequence()
+		return
+	}
 
 	// initialise exit
 
@@ -210,20 +209,27 @@ func distributor(p Params, d distributorChannels, kp <-chan rune) {
 
 func (c *Controller) shutDownSequence() {
 	// Get the final state of the world
+	fmt.Println("5")
 	world, turn := controller.acknowledgedCells.Get()
 
 	// Output the final image
+	fmt.Println("6")
 	controller.eventsSender.SendOutputPGM(world, turn)
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
+	fmt.Println("7")
 	controller.eventsSender.SendFinalTurn(turn, stubs.GetAliveCells(world)) //turn+1? DEBUG
 	// Make sure that the Io has finished any output before exiting.
-	c.d.ioCommand <- ioCheckIdle
-	<-c.d.ioIdle
+	fmt.Println("8")
+	c.eventsSender.C.ioCommand <- ioCheckIdle
+	fmt.Println("9")
+	<-c.eventsSender.C.ioIdle
 	// fmt.Printf("before\n")
-
+	c.eventsSender.C.events <- StateChange{turn, Quitting}
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	close(c.d.events)
+	fmt.Println("10")
+	close(c.eventsSender.C.events)
+	fmt.Println("11")
 }
 
 // This method will be called if the Broker has a calculated new state

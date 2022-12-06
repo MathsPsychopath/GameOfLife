@@ -68,17 +68,7 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 	lastPushState := time.Now()
 	// done := make(chan *rpc.Call, doneBuffer)
 	for b.lastCompletedTurn < req.P.Turns && b.Controller != nil {
-		if time.Now().Second()-lastPushState.Second() > int(time.Second.Seconds()) {
-			if b.Controller == nil {
-				lastPushState = time.Now()
-				continue
-			}
-			// get workers not responded
-			workersNotResponded := b.getWorkersNotResponded()
-			for id := range workersNotResponded {
-				b.errorChan <- id
-			}
-		}
+
 		// fmt.Printf("lastCompletedTurn: %d totalTurns: %d controllerNil?: %t\n", b.lastCompletedTurn, req.P.Turns, b.Controller == nil)
 		select {
 		case badWorkerId := <-b.errorChan: //if error: restart workers
@@ -112,12 +102,22 @@ func (b *Broker) StartGOL(req stubs.StartGOLRequest, res *stubs.NilResponse) (er
 			lastPushState = time.Now()
 			b.Mu.Unlock()
 		default:
-
+			if time.Now().Second()-lastPushState.Second() > int(time.Second.Seconds()) {
+				if b.Controller == nil {
+					lastPushState = time.Now()
+					continue
+				}
+				// get workers not responded
+				workersNotResponded := b.getWorkersNotResponded()
+				for id := range workersNotResponded {
+					b.errorChan <- id
+				}
+			}
 		}
 
 	}
 	b.resetBroker(-1)
-	b.primeWorkers(true) //to stop the workers from carrying on executing turns when controller disconnects before all turns have been processed
+	b.primeWorkers(false) //to stop the workers from carrying on executing turns when controller disconnects before all turns have been processed
 	fmt.Println("brokerStartGol Done")
 	return
 }
@@ -151,8 +151,8 @@ func (b *Broker) PauseState(req stubs.NilRequest, res *stubs.PauseResponse) (err
 
 func (b *Broker) PushState(req stubs.BrokerPushStateRequest, res *stubs.NilResponse) (err error) {
 	b.Mu.Lock()
+	defer b.Mu.Unlock()
 	if b.exit || b.Controller == nil {
-		b.Mu.Unlock()
 		return
 	}
 	_, exists := b.workersResponded[req.Turn]
@@ -168,10 +168,12 @@ func (b *Broker) PushState(req stubs.BrokerPushStateRequest, res *stubs.NilRespo
 	}
 	if len(b.workersResponded[req.Turn]) == len(b.workerIds) { //if all cells have been processed for this turn
 		go func() {
-			b.processCellsReq <- true //send cell process request
+			select {
+			case b.processCellsReq <- true: //send cell process request
+
+			}
 		}()
 	}
-	b.Mu.Unlock()
 	return
 }
 

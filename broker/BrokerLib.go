@@ -32,6 +32,7 @@ type Broker struct {
 	exit              bool
 	processCellsReq   chan bool
 	errorChan         chan int
+	processing        bool
 }
 
 // initialises Broker struct
